@@ -1,435 +1,607 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>GAP TIME - 공강시간 활용 플래너</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
-  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GAP TIME — 공강시간 활용 플래너</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-  <!-- Confetti Canvas -->
-  <canvas id="confetti-canvas"></canvas>
-
-  <!-- Toast Notification -->
-  <div id="toastPopup" class="toast-popup">
-    <span>📋</span>
-    <span id="toastText">클립보드에 일정이 복사되었습니다!</span>
-  </div>
-
-  <div class="app-container">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="brand-logo" onclick="goToScreen('intro')">
-        <div class="brand-logo-icon">G</div>
-        <span>GAP TIME</span>
-      </div>
-      <div class="header-tag">
-        <span>🎓</span>
-        <span>공강시간 플래너</span>
-      </div>
-    </header>
-
-    <!-- ============================================== -->
-    <!-- SCREEN 1: INTRO / HERO SCREEN                  -->
-    <!-- ============================================== -->
-    <section id="screen-intro" class="screen active intro-screen">
-      <div class="intro-badge">
-        <span>✨ 대학생 공강시간 맞춤 솔루션</span>
-      </div>
-
-      <h1 class="intro-title">
-        버려지는 공강시간 없이,<br />
-        <span>나만의 알찬 하루!</span>
-      </h1>
-
-      <p class="intro-subtitle">GAP TIME : 공강시간 활용 플래너</p>
-
-      <p class="intro-desc">
-        "다음 강의까지 2시간, 뭘 해야 할지 막막하셨나요?"<br />
-        위치, 컨디션, 목표에 꼭 맞춘 현실적인 시간표를 똑똑하게 짜드립니다.
-      </p>
-
-      <!-- Visual Graphic Card portraying College Gap Time -->
-      <div class="intro-visual-card">
-        <div class="visual-scene">
-          <div class="scene-avatar">
-            <span>🧑‍🎓</span>
-          </div>
-          <div class="scene-timeline-preview">
-            <div class="preview-chip">
-              <span class="time">13:00~13:45</span>
-              <span>📚 중앙도서관 열람실 공부</span>
-            </div>
-            <div class="preview-chip">
-              <span class="time">13:45~14:00</span>
-              <span>☕ 교내 카페 음료 & 스트레칭</span>
-            </div>
-            <div class="preview-chip">
-              <span class="time">14:00~15:00</span>
-              <span>💻 PC랩실 레포트 자료 정리</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="feature-chips">
-          <div class="feature-chip">
-            <span class="chip-icon">⚡</span>
-            <div>
-              <strong>실시간 맞춤</strong>
-              <span>시간표 자동 생성</span>
-            </div>
-          </div>
-          <div class="feature-chip">
-            <span class="chip-icon">📍</span>
-            <div>
-              <strong>장소 맞춤형</strong>
-              <span>학교 · 집 · 이동 중</span>
-            </div>
-          </div>
-          <div class="feature-chip">
-            <span class="chip-icon">🔋</span>
-            <div>
-              <strong>컨디션 케어</strong>
-              <span>피로도 반영 설계</span>
-            </div>
-          </div>
-          <div class="feature-chip">
-            <span class="chip-icon">✅</span>
-            <div>
-              <strong>진행률 체크</strong>
-              <span>실시간 달성률 확인</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="intro-footer">
-        <button type="button" class="btn-primary btn-accent" onclick="goToScreen('form')">
-          <span>내 공강 계획하기</span>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M5 12h14"></path>
-            <path d="m12 5 7 7-7 7"></path>
+  <header class="app-header">
+    <div class="header-inner">
+      <button type="button" class="brand-btn" id="brandHomeBtn" aria-label="GAP TIME 홈으로 이동">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"></circle>
+            <polyline points="12 7 12 12 15.5 14"></polyline>
           </svg>
-        </button>
-      </div>
-    </section>
-
-    <!-- ============================================== -->
-    <!-- SCREEN 2: INPUT FORM SCREEN                   -->
-    <!-- ============================================== -->
-    <section id="screen-form" class="screen form-screen">
-      <div class="step-header">
-        <div class="step-indicator">STEP 01</div>
-        <h2 class="form-title">어떤 공강 시간을 보내실 건가요?</h2>
-        <p class="form-desc">5가지 정보를 알려주시면 최적의 시간표를 만들어 드려요.</p>
-      </div>
-
-      <!-- Validation Error Box -->
-      <div id="validationAlert" class="validation-alert">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-        <span id="validationAlertText">모든 필수 항목을 선택해 주세요.</span>
-      </div>
-
-      <!-- ① Start Time -->
-      <div class="form-section" id="section-startTime">
-        <div class="section-label">
-          <span class="label-title">
-            <span>⏰</span> ① 공강 시작 시간
-          </span>
-          <span class="label-badge required">필수</span>
-        </div>
-        <div class="time-picker-wrapper">
-          <div class="time-input-box">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue-deep)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
-            <input type="time" id="startTimeInput" value="13:00" />
-            <div id="timeKoreanDisplay" class="time-korean-display">오후 1:00</div>
-          </div>
-        </div>
-        <div class="quick-time-chips">
-          <button type="button" class="time-quick-btn" onclick="setTime('10:30')">오전 10:30</button>
-          <button type="button" class="time-quick-btn" onclick="setTime('12:00')">낮 12:00</button>
-          <button type="button" class="time-quick-btn active" onclick="setTime('13:00')">오후 1:00</button>
-          <button type="button" class="time-quick-btn" onclick="setTime('15:30')">오후 3:30</button>
-          <button type="button" class="time-quick-btn" onclick="setCurrentTime()">현재 시각</button>
-        </div>
-      </div>
-
-      <!-- ② Duration -->
-      <div class="form-section" id="section-duration">
-        <div class="section-label">
-          <span class="label-title">
-            <span>⏳</span> ② 공강 지속 시간
-          </span>
-          <span class="label-badge required">필수</span>
-        </div>
-
-        <div class="duration-display-box">
-          <div class="duration-number">
-            <span id="durationDisplay">2시간</span>
-            <small id="durationMinutesDisplay">(120분)</small>
-          </div>
-          <div class="duration-sub">슬라이더나 퀵 버튼으로 선택하세요 (30분 ~ 240분)</div>
-        </div>
-
-        <div class="slider-container">
-          <input 
-            type="range" 
-            id="durationSlider" 
-            class="custom-range" 
-            min="30" 
-            max="240" 
-            step="15" 
-            value="120"
-            oninput="handleSliderChange(this.value)"
-          />
-          <div class="slider-marks">
-            <span>30분</span>
-            <span>1시간</span>
-            <span>2시간</span>
-            <span>3시간</span>
-            <span>4시간</span>
-          </div>
-        </div>
-
-        <div class="preset-buttons">
-          <button type="button" class="preset-btn" onclick="setPresetDuration(30)">30분</button>
-          <button type="button" class="preset-btn" onclick="setPresetDuration(60)">1시간</button>
-          <button type="button" class="preset-btn" onclick="setPresetDuration(90)">1시간 30분</button>
-          <button type="button" class="preset-btn active" onclick="setPresetDuration(120)">2시간</button>
-          <button type="button" class="preset-btn" onclick="setPresetDuration(180)">3시간</button>
-          <button type="button" class="preset-btn" onclick="setPresetDuration(240)">4시간</button>
-        </div>
-      </div>
-
-      <!-- ③ Location -->
-      <div class="form-section" id="section-location">
-        <div class="section-label">
-          <span class="label-title">
-            <span>📍</span> ③ 현재 위치
-          </span>
-          <span class="label-badge required">필수</span>
-        </div>
-        <div class="option-grid grid-3">
-          <div class="option-card selected" data-value="school" onclick="selectOption('location', 'school')">
-            <span class="option-card-icon">🏫</span>
-            <span class="option-card-title">학교</span>
-            <span class="option-card-sub">도서관·과제실·학식</span>
-          </div>
-          <div class="option-card" data-value="home" onclick="selectOption('location', 'home')">
-            <span class="option-card-icon">🏠</span>
-            <span class="option-card-title">집</span>
-            <span class="option-card-sub">편안한 휴식·홈트</span>
-          </div>
-          <div class="option-card" data-value="transit" onclick="selectOption('location', 'transit')">
-            <span class="option-card-icon">🚌</span>
-            <span class="option-card-title">이동 중</span>
-            <span class="option-card-sub">지하철·버스·도보</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- ④ Condition -->
-      <div class="form-section" id="section-condition">
-        <div class="section-label">
-          <span class="label-title">
-            <span>🔋</span> ④ 현재 컨디션
-          </span>
-          <span class="label-badge required">필수</span>
-        </div>
-        <div class="option-grid grid-3">
-          <div class="option-card" data-value="tired" onclick="selectOption('condition', 'tired')">
-            <span class="option-card-icon">🥱</span>
-            <span class="option-card-title">매우 피곤함</span>
-            <span class="option-card-sub">낮잠·힐링·가벼운 정리</span>
-          </div>
-          <div class="option-card selected" data-value="normal" onclick="selectOption('condition', 'normal')">
-            <span class="option-card-icon">😊</span>
-            <span class="option-card-title">보통</span>
-            <span class="option-card-sub">일반 공부·적당한 활동</span>
-          </div>
-          <div class="option-card" data-value="energetic" onclick="selectOption('condition', 'energetic')">
-            <span class="option-card-icon">⚡</span>
-            <span class="option-card-title">활기참</span>
-            <span class="option-card-sub">고효율 몰입·열정 운동</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- ⑤ Goal -->
-      <div class="form-section" id="section-goal">
-        <div class="section-label">
-          <span class="label-title">
-            <span>🎯</span> ⑤ 오늘의 목표
-          </span>
-          <span class="label-badge required">필수</span>
-        </div>
-        <div class="goal-grid">
-          <div class="goal-card selected" data-value="study" onclick="selectOption('goal', 'study')">
-            <span class="goal-icon">📖</span>
-            <div class="goal-info">
-              <div class="goal-title">공부</div>
-              <div class="goal-desc">전공 복습·시험 대비</div>
-            </div>
-          </div>
-          <div class="goal-card" data-value="assignment" onclick="selectOption('goal', 'assignment')">
-            <span class="goal-icon">💻</span>
-            <div class="goal-info">
-              <div class="goal-title">과제</div>
-              <div class="goal-desc">자료조사·보고서·발표</div>
-            </div>
-          </div>
-          <div class="goal-card" data-value="exercise" onclick="selectOption('goal', 'exercise')">
-            <span class="goal-icon">🏃‍♂️</span>
-            <div class="goal-info">
-              <div class="goal-title">운동</div>
-              <div class="goal-desc">헬스·스트레칭·산책</div>
-            </div>
-          </div>
-          <div class="goal-card" data-value="meal" onclick="selectOption('goal', 'meal')">
-            <span class="goal-icon">🍱</span>
-            <div class="goal-info">
-              <div class="goal-title">식사</div>
-              <div class="goal-desc">학식·카페·간편식</div>
-            </div>
-          </div>
-          <div class="goal-card" data-value="rest" onclick="selectOption('goal', 'rest')">
-            <span class="goal-icon">🛋️</span>
-            <div class="goal-info">
-              <div class="goal-title">휴식</div>
-              <div class="goal-desc">낮잠·음악 감상·멍때리기</div>
-            </div>
-          </div>
-          <div class="goal-card" data-value="errand" onclick="selectOption('goal', 'errand')">
-            <span class="goal-icon">📋</span>
-            <div class="goal-info">
-              <div class="goal-title">개인 용무</div>
-              <div class="goal-desc">출력·은행·도서 반납</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ⑥ Optional Memo -->
-      <div class="form-section" id="section-memo">
-        <div class="section-label">
-          <span class="label-title">
-            <span>✏️</span> 추가 메모 / 과목명 (선택)
-          </span>
-          <span class="label-badge">선택</span>
-        </div>
-        <input 
-          type="text" 
-          id="customMemoInput" 
-          class="memo-input" 
-          placeholder="예: 마케팅원론 과제, 중간고사 족보 복습, 토익 단어" 
-          maxlength="40"
-        />
-        <div class="memo-hint">💡 입력한 내용이 시간표 활동과 비서 멘트에 쏙 반영됩니다.</div>
-      </div>
-
-      <button type="button" class="btn-primary" onclick="generateSchedule()">
-        <span>내 공강 일정 만들기!</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h14"></path>
-          <path d="m12 5 7 7-7 7"></path>
-        </svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-title">GAP TIME</span>
+          <span class="brand-sub">공강시간 활용 플래너</span>
+        </span>
       </button>
-    </section>
 
-    <!-- ============================================== -->
-    <!-- SCREEN 3: RESULT TIMELINE SCREEN               -->
-    <!-- ============================================== -->
-    <section id="screen-result" class="screen result-screen">
-      <!-- Assistant Message Bubble -->
-      <div class="assistant-card">
-        <div class="assistant-header">
-          <div class="assistant-avatar">🤖</div>
-          <div class="assistant-name">
-            <span>공강 비서 갭타이머</span>
-            <span class="assistant-badge">맞춤 분석 완료</span>
-          </div>
-        </div>
-        <div id="assistantSpeech" class="assistant-speech">
-          <!-- Dynamically inserted speech -->
-        </div>
-      </div>
-
-      <!-- Summary Condition Bar -->
-      <div class="condition-summary">
-        <div class="summary-title">선택한 공강 조건 요약</div>
-        <div id="summaryTags" class="summary-tags">
-          <!-- Dynamic summary tags -->
-        </div>
-      </div>
-
-      <!-- Congratulation Banner (Shown on 100% completion) -->
-      <div id="congratsBanner" class="congrats-banner">
-        <div class="congrats-icon">🎉</div>
-        <div class="congrats-title">오늘의 공강 미션 올클리어!</div>
-        <div class="congrats-desc">버려지는 시간 없이 공강을 100% 알차게 채우셨네요. 다음 수업도 파이팅입니다! 💪</div>
-      </div>
-
-      <!-- Progress Tracker -->
-      <div class="progress-card">
-        <div class="progress-meta">
-          <div class="progress-label">
-            <span>🔥</span> 일정 진행률
-          </div>
-          <div id="progressPercent" class="progress-percent">0%</div>
-        </div>
-        <div class="progress-bar-bg">
-          <div id="progressBarFill" class="progress-bar-fill"></div>
-        </div>
-        <div id="progressStatusText" class="progress-status-text">완료한 일정을 체크해 보세요! (0/0개 완료)</div>
-      </div>
-
-      <!-- Timeline List -->
-      <div class="timeline-header">
-        <div class="timeline-title">
-          <span>📅</span> 나만의 공강 시간표
-        </div>
-        <div id="timelineTotalDuration" class="timeline-total">총 120분</div>
-      </div>
-
-      <div id="timelineContainer" class="timeline-list">
-        <!-- Dynamically generated timeline items -->
-      </div>
-
-      <!-- Action Buttons -->
-      <div class="result-actions">
-        <button type="button" class="btn-primary" onclick="regenerateSchedule()">
-          <span>다른 일정으로 추천받기 🔄</span>
+      <nav class="nav-tabs" aria-label="주요 메뉴">
+        <button type="button" class="nav-tab is-active" data-view="home" id="navHome">홈</button>
+        <button type="button" class="nav-tab" data-view="input" id="navInput">일정 만들기</button>
+        <button type="button" class="nav-tab" data-view="result" id="navResult">내 시간표</button>
+        <button type="button" class="nav-tab" data-view="history" id="navHistory">
+          기록 <span class="nav-badge" id="historyCountBadge">0</span>
         </button>
-        
-        <div class="action-row">
-          <button type="button" class="btn-secondary" onclick="copyScheduleToClipboard()">
-            <span>📋 일정 복사하기</span>
-          </button>
-          <button type="button" class="btn-secondary" onclick="goToScreen('form')">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-            <span>입력 수정하기</span>
-          </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- 1. HOME VIEW -->
+    <section id="view-home" class="view-panel is-active" aria-labelledby="homeTitle">
+      <div class="hero-card">
+        <div>
+          <span class="hero-kicker">대학생 맞춤형 개인 비서 플래너</span>
+          <h1 class="hero-title" id="homeTitle">GAP TIME</h1>
+          <p class="hero-subtitle">공강시간 활용 플래너</p>
+          <p class="hero-lead">
+            버려지는 공강시간 없이, 나만의 알찬 하루 만들기!<br>
+            수업 사이 애매하게 남는 공강시간, 현재 위치와 컨디션, 오늘의 우선순위에 맞춰 현실적인 시간표를 바로 설계하고 타이머로 실행까지 관리하세요.
+          </p>
+          <div class="hero-actions">
+            <button type="button" class="btn btn-primary btn-lg" id="startPlanBtn">내 공강 계획하기</button>
+            <button type="button" class="btn btn-secondary btn-lg" id="homeResumeBtn" style="display: none;">최근 시간표 이어보기</button>
+            <button type="button" class="btn btn-soft btn-lg" id="homeHistoryBtn">저장된 기록 보기</button>
+          </div>
+        </div>
+
+        <div class="hero-illustration" aria-hidden="true">
+          <svg viewBox="0 0 320 250" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="14" y="18" width="292" height="214" rx="18" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="2"/>
+            <rect x="30" y="34" width="110" height="22" rx="11" fill="#10213D"/>
+            <text x="46" y="49" fill="#FFFFFF" font-size="10.5" font-weight="700" font-family="sans-serif">13:00 ~ 15:00</text>
+            <circle cx="272" cy="45" r="14" fill="#CCFBF1"/>
+            <path d="M272 38V45L277 48" stroke="#0D9488" stroke-width="2.2" stroke-linecap="round"/>
+
+            <!-- Student at desk illustration -->
+            <circle cx="88" cy="112" r="22" fill="#1B3358"/>
+            <path d="M68 112C68 98 78 90 88 90C98 90 108 98 108 112" fill="#10213D"/>
+            <circle cx="88" cy="116" r="15" fill="#FDE6D8"/>
+            <path d="M56 170C56 148 70 138 88 138C106 138 120 148 120 170V182H56V170Z" fill="#3B82F6"/>
+            <rect x="44" y="180" width="94" height="12" rx="6" fill="#CBD5E1"/>
+            <rect x="64" y="158" width="52" height="22" rx="4" fill="#0F172A"/>
+            <rect x="68" y="162" width="44" height="14" rx="2" fill="#DBEAFE"/>
+            <rect x="128" y="164" width="16" height="16" rx="4" fill="#EA580C"/>
+
+            <!-- Mini Schedule Cards -->
+            <rect x="158" y="76" width="132" height="36" rx="9" fill="#EFF6FF" stroke="#BFDBFE"/>
+            <rect x="164" y="83" width="5" height="22" rx="2.5" fill="#2563EB"/>
+            <rect x="176" y="85" width="76" height="7" rx="3.5" fill="#10213D"/>
+            <rect x="176" y="96" width="50" height="5" rx="2.5" fill="#64748B"/>
+            <circle cx="274" cy="94" r="7" fill="#14B8A6"/>
+            <path d="M271 94L273.3 96.3L277.5 92" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <rect x="158" y="120" width="132" height="36" rx="9" fill="#F5F3FF" stroke="#DDD6FE"/>
+            <rect x="164" y="127" width="5" height="22" rx="2.5" fill="#7C3AED"/>
+            <rect x="176" y="129" width="84" height="7" rx="3.5" fill="#10213D"/>
+            <rect x="176" y="140" width="46" height="5" rx="2.5" fill="#64748B"/>
+
+            <rect x="158" y="164" width="132" height="36" rx="9" fill="#F0FDFA" stroke="#99F6E4"/>
+            <rect x="164" y="171" width="5" height="22" rx="2.5" fill="#0D9488"/>
+            <rect x="176" y="173" width="64" height="7" rx="3.5" fill="#10213D"/>
+            <rect x="176" y="184" width="52" height="5" rx="2.5" fill="#0D9488"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-item">
+          <div class="feature-icon">🎯</div>
+          <h3>실시간 맞춤 배분</h3>
+          <p>여러 목표의 우선순위에 따라 15분 단위로 균형 있게 시간을 자동 배분해요.</p>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon">📍</div>
+          <h3>장소 맞춤형 추천</h3>
+          <p>학교·집·이동 중 상황에 맞춰 지금 자리에서 바로 가능한 활동만 추천해요.</p>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon">🔋</div>
+          <h3>컨디션 반영 설계</h3>
+          <p>피곤함·보통·활기참 상태에 따라 학습 강도와 휴식 비율을 알맞게 조절해요.</p>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon">⏱️</div>
+          <h3>진행률 &amp; 타이머</h3>
+          <p>활동별 실시간 타이머와 완료 체크, 자동 저장으로 지난 시간표까지 재사용해요.</p>
         </div>
       </div>
     </section>
+
+    <!-- 2. INPUT VIEW -->
+    <section id="view-input" class="view-panel" aria-labelledby="inputPageTitle">
+      <div class="input-page-header">
+        <div>
+          <h2 class="input-page-title" id="inputPageTitle">공강 조건 입력하기</h2>
+          <p class="input-page-sub">오늘 상황에 맞게 선택하면 딱 맞는 공강 시간표를 구성해 드려요.</p>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="inputToHistoryBtn">같은 요일 / 과거 기록 보기</button>
+      </div>
+
+      <div id="sameWeekdayHintBox" class="notice-box notice-mint" style="display: none; margin-top: 0; margin-bottom: 16px;">
+        <span>💡</span>
+        <div style="flex: 1;">
+          <div id="sameWeekdayHintText" style="font-weight: 700;"></div>
+        </div>
+        <button type="button" class="btn btn-mint btn-xs" id="reuseWeekdayQuickBtn">바로 불러와 쓰기</button>
+      </div>
+
+      <!-- STEP 01: Date & Start Time -->
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <span class="step-badge">STEP 01</span>
+            <h3 class="card-title">공강 날짜와 시작 시간</h3>
+            <p class="card-desc">선택한 날짜 기준으로 저장되며, 시작 시간에 맞춰 모든 일정 시간이 자동 계산됩니다.</p>
+          </div>
+          <span class="formatted-pill" id="selectedDatePreview">2026년 11월 27일 (금)</span>
+        </div>
+
+        <div class="grid-2">
+          <div class="field-group">
+            <label class="field-label" for="gapDateInput">
+              <span>공강 날짜</span>
+              <span class="field-hint" id="dateWeekdayHint">금요일</span>
+            </label>
+            <div class="inline-row">
+              <input type="date" id="gapDateInput" class="input-control">
+              <button type="button" class="btn btn-soft btn-sm" id="setTodayDateBtn">오늘</button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="gapStartTimeInput">
+              <span>공강 시작 시간</span>
+              <span class="field-hint" id="formattedStartTimeHint">오전 10시 30분</span>
+            </label>
+            <div class="inline-row">
+              <input type="time" id="gapStartTimeInput" class="input-control" value="10:30">
+              <button type="button" class="btn btn-soft btn-sm" id="setCurrentTimeBtn">현재 시간</button>
+            </div>
+            <div class="quick-chips" aria-label="자주 쓰는 공강 시작 시간">
+              <button type="button" class="chip-btn start-preset-btn" data-time="09:00">오전 9시</button>
+              <button type="button" class="chip-btn start-preset-btn" data-time="10:30">오전 10시 30분</button>
+              <button type="button" class="chip-btn start-preset-btn" data-time="13:00">오후 1시</button>
+              <button type="button" class="chip-btn start-preset-btn" data-time="15:30">오후 3시 30분</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 02: Duration Slider -->
+      <div class="card">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <span class="step-badge">STEP 02</span>
+            <h3 class="card-title">공강 지속 시간</h3>
+            <p class="card-desc">0분부터 최대 4시간(240분)까지 15분 단위로 정확하게 조절할 수 있어요.</p>
+          </div>
+        </div>
+
+        <div class="duration-display-row">
+          <div class="duration-big-value" id="durationDisplayText">2시간</div>
+          <div class="duration-range-tag" id="durationTimeSpanPreview">10:30 ~ 12:30 (120분)</div>
+        </div>
+
+        <div class="slider-wrap">
+          <div class="slider-area" id="durationSliderArea">
+            <input type="range" id="durationSlider" class="slider-native-input" min="0" max="240" step="15" value="120" aria-label="공강 지속 시간 (0분~240분)">
+            <div class="slider-rail-frame" id="sliderRailFrame">
+              <div class="slider-rail-bg"></div>
+              <div class="slider-rail-fill" id="sliderFill" style="width: 50%;"></div>
+              <div class="slider-tick-dot" style="left: 0%;"></div>
+              <div class="slider-tick-dot" style="left: 25%;"></div>
+              <div class="slider-tick-dot" style="left: 50%;"></div>
+              <div class="slider-tick-dot" style="left: 75%;"></div>
+              <div class="slider-tick-dot" style="left: 100%;"></div>
+              <div class="slider-visual-thumb" id="sliderThumb" style="left: 50%;"></div>
+            </div>
+          </div>
+          <div class="slider-labels-frame" id="sliderLabelsFrame">
+            <button type="button" class="slider-tick-label" data-minutes="0" style="left: 0%;">0시간</button>
+            <button type="button" class="slider-tick-label" data-minutes="60" style="left: 25%;">1시간</button>
+            <button type="button" class="slider-tick-label is-active" data-minutes="120" style="left: 50%;">2시간</button>
+            <button type="button" class="slider-tick-label" data-minutes="180" style="left: 75%;">3시간</button>
+            <button type="button" class="slider-tick-label" data-minutes="240" style="left: 100%;">4시간</button>
+          </div>
+        </div>
+
+        <div class="quick-duration-grid" id="quickDurationGrid">
+          <button type="button" class="dur-btn" data-minutes="0">0분</button>
+          <button type="button" class="dur-btn" data-minutes="30">30분</button>
+          <button type="button" class="dur-btn" data-minutes="60">1시간</button>
+          <button type="button" class="dur-btn" data-minutes="90">1시간 30분</button>
+          <button type="button" class="dur-btn is-selected" data-minutes="120">2시간</button>
+          <button type="button" class="dur-btn" data-minutes="180">3시간</button>
+          <button type="button" class="dur-btn" data-minutes="240">4시간</button>
+        </div>
+
+        <div id="zeroDurationNotice" class="notice-box notice-warn" style="display: none;">
+          <span>⚠️</span>
+          <span>공강시간이 없습니다. 15분 이상 선택해 주세요.</span>
+        </div>
+      </div>
+
+      <!-- STEP 03: Location & Condition -->
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <span class="step-badge">STEP 03</span>
+            <h3 class="card-title">현재 위치와 컨디션</h3>
+            <p class="card-desc">장소와 컨디션에 따라 활동 종류와 강도가 달라집니다.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="field-group">
+            <div class="field-label"><span>현재 위치</span></div>
+            <div class="option-grid-3" id="locationOptions">
+              <button type="button" class="choice-card is-selected" data-location="학교">
+                <span class="choice-emoji">🏫</span>
+                <span class="choice-name">학교</span>
+                <span class="choice-sub">도서관·학식·교내</span>
+              </button>
+              <button type="button" class="choice-card" data-location="집">
+                <span class="choice-emoji">🏠</span>
+                <span class="choice-name">집</span>
+                <span class="choice-sub">편안한 휴식·집중</span>
+              </button>
+              <button type="button" class="choice-card" data-location="이동 중">
+                <span class="choice-emoji">🚌</span>
+                <span class="choice-name">이동 중</span>
+                <span class="choice-sub">대중교통 안전 기준</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <div class="field-label"><span>현재 컨디션</span></div>
+            <div class="option-grid-3" id="conditionOptions">
+              <button type="button" class="choice-card" data-condition="매우 피곤함">
+                <span class="choice-emoji">😴</span>
+                <span class="choice-name">매우 피곤함</span>
+                <span class="choice-sub">부담 적은 회복 위주</span>
+              </button>
+              <button type="button" class="choice-card is-selected" data-condition="보통">
+                <span class="choice-emoji">🙂</span>
+                <span class="choice-name">보통</span>
+                <span class="choice-sub">균형 잡힌 활동</span>
+              </button>
+              <button type="button" class="choice-card" data-condition="활기참">
+                <span class="choice-emoji">⚡</span>
+                <span class="choice-name">활기참</span>
+                <span class="choice-sub">고집중·적극 활동</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="transitSafetyNotice" class="notice-box notice-info" style="display: none;">
+          <span>🛡️</span>
+          <span><strong>이동 중 안전 안내:</strong> 대중교통 승객 상황을 기준으로 안전하게 가능한 활동만 추천해 드려요. 직접 운전 중이시라면 화면 조작이나 독서는 피하고 휴식·오디오 위주로 이용해 주세요!</span>
+        </div>
+      </div>
+
+      <!-- STEP 04: Multi-Select Goals & Priority -->
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <span class="step-badge">STEP 04</span>
+            <h3 class="card-title">오늘의 목표 선택 및 우선순위</h3>
+            <p class="card-desc">하고 싶은 목표를 여러 개 선택하고 순위를 정해 주세요. 높은 순위에 더 많은 시간이 배분돼요.</p>
+          </div>
+          <span class="field-hint" id="selectedGoalCountText">2개 선택됨</span>
+        </div>
+
+        <div class="goals-grid" id="goalsGrid"></div>
+
+        <div class="priority-box" id="priorityBox">
+          <div class="priority-box-head">
+            <span class="priority-box-title">목표 우선순위 설정 (위로 · 아래로 이동)</span>
+            <span class="field-hint">가중치: 1순위(5) · 2순위(3) · 3순위(2) · 4순위 이하(1)</span>
+          </div>
+          <div class="priority-list" id="priorityList"></div>
+        </div>
+      </div>
+
+      <!-- STEP 05: Optional Memo -->
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <span class="step-badge">STEP 05 · 선택 사항</span>
+            <h3 class="card-title">추가 메모</h3>
+            <p class="card-desc">구체적인 과목명이나 꼭 하고 싶은 일을 적으면 시간표에 자연스럽게 반영해 드려요.</p>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <textarea id="memoInput" class="input-control" placeholder="예: 금융수학 4장 복습, 경영학 과제 제출, 영어 단어 50개 암기"></textarea>
+          <div class="quick-chips">
+            <button type="button" class="chip-btn memo-example-btn" data-memo="금융수학 4장 복습, 경영학 과제 제출">예시 채우기 1</button>
+            <button type="button" class="chip-btn memo-example-btn" data-memo="영어 단어 50개 암기, 도서관 책 반납">예시 채우기 2</button>
+            <button type="button" class="chip-btn" id="clearMemoBtn">메모 비우기</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="inputErrorBox" class="notice-box notice-danger" style="display: none;" role="alert">
+        <span>❗</span>
+        <span id="inputErrorText"></span>
+      </div>
+
+      <div class="submit-bar">
+        <span class="field-hint" id="submitReadySummary">선택 조건: 2시간 · 학교 · 보통 · 1순위 공부</span>
+        <button type="button" class="btn btn-primary btn-lg" id="generateScheduleBtn">내 공강 일정 만들기!</button>
+      </div>
+    </section>
+
+    <!-- 3. RESULT VIEW -->
+    <section id="view-result" class="view-panel" aria-labelledby="resultViewTitle">
+      <div id="resultEmptyState" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">📅</div>
+        <h3>아직 생성된 공강 시간표가 없어요</h3>
+        <p>공강 조건을 입력하거나 저장된 기록에서 이전 시간표를 불러와 보세요.</p>
+        <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;">
+          <button type="button" class="btn btn-primary" id="emptyToInputBtn">공강 일정 만들기</button>
+          <button type="button" class="btn btn-secondary" id="emptyToHistoryBtn">기록 보기</button>
+        </div>
+      </div>
+
+      <div id="resultContent">
+        <div class="result-topbar">
+          <div class="result-topbar-actions">
+            <button type="button" class="btn btn-accent btn-sm" id="rerollScheduleBtn">다른 일정으로 추천받기 🔄</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="editInputsBtn">입력 수정하기</button>
+            <button type="button" class="btn btn-soft btn-sm" id="resultToHistoryBtn">기록 저장 및 확인</button>
+          </div>
+          <div class="save-status-pill" id="saveStatusPill">
+            <span>✓</span>
+            <span id="saveStatusText">자동 저장 완료</span>
+          </div>
+        </div>
+
+        <!-- Sticky Active Timer Bar -->
+        <div class="active-timer-bar" id="activeTimerBar">
+          <div class="timer-bar-left">
+            <span class="live-dot" id="timerBarDot"></span>
+            <div>
+              <div style="font-size: 11px; color: #94A3B8;" id="timerBarStatusLabel">타이머 실행 중</div>
+              <div class="timer-bar-title" id="timerBarTitle">활동명</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span class="timer-bar-clock" id="timerBarClock">00:00</span>
+            <div class="timer-bar-actions">
+              <button type="button" class="btn btn-mint btn-xs" id="timerBarToggleBtn">일시정지</button>
+              <button type="button" class="btn btn-secondary btn-xs" id="timerBarResetBtn">초기화</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Greeting & Condition Summary -->
+        <div class="greeting-card">
+          <div class="greeting-head">
+            <span>🤖</span>
+            <span id="resultViewTitle">GAP TIME 비서의 추천</span>
+          </div>
+          <p class="greeting-text" id="greetingText"></p>
+          <div class="summary-chips" id="summaryChips"></div>
+          <div id="omittedGoalsNotice" class="notice-box notice-warn" style="display: none;">
+            <span>ℹ️</span>
+            <span id="omittedGoalsText"></span>
+          </div>
+        </div>
+
+        <!-- Overall Progress -->
+        <div class="card progress-card">
+          <div class="progress-header">
+            <div>
+              <div class="progress-stats" id="progressStatsText">전체 진행률 · 0 / 0 완료</div>
+              <div class="field-hint" id="progressSubText">활동 옆 완료 버튼을 눌러 오늘의 공강 달성률을 확인하세요.</div>
+            </div>
+            <div class="progress-percent" id="progressPercentText">0%</div>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFillBar" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- Time Allocation Chart & Reason -->
+        <div class="card">
+          <div class="section-head">
+            <div>
+              <h3 class="card-title">목표별 시간 배분 &amp; 추천 이유</h3>
+              <p class="card-desc" id="reasonSummaryText"></p>
+            </div>
+          </div>
+
+          <div class="viz-grid">
+            <div class="donut-wrap">
+              <svg id="allocDonutSvg" viewBox="0 0 180 180" width="180" height="180" aria-label="공강 시간 배분 도넛 그래프"></svg>
+              <div class="donut-center">
+                <div class="donut-center-total" id="donutCenterTotal">2시간</div>
+                <div class="donut-center-label">총 공강시간</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="stacked-bar" id="allocStackedBar" aria-label="공강 시간 배분 누적 막대 그래프"></div>
+              <div class="alloc-legend" id="allocLegend"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Timeline Schedule -->
+        <div class="card">
+          <div class="schedule-head-bar">
+            <div>
+              <h3 class="card-title">나만의 공강 시간표</h3>
+              <p class="card-desc" id="scheduleMetaDesc">활동 수정·순서 변경·추가·삭제 시 이후 시간이 자동 재계산됩니다.</p>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" id="changeStartTimeBtn">시작 시간 변경</button>
+              <button type="button" class="btn btn-soft btn-sm" id="addActivityBtn">+ 활동 추가</button>
+            </div>
+          </div>
+
+          <div class="timeline-list" id="timelineList"></div>
+
+          <p class="tiny-note">
+            ※ 타이머는 실제 시각(<code>Date.now()</code>) 기준으로 계산되어 탭을 이동하거나 새로고침해도 남은 시간이 복구됩니다. 단, 브라우저나 기기를 완전히 종료하면 실시간 알림음은 제한됩니다.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. HISTORY VIEW -->
+    <section id="view-history" class="view-panel" aria-labelledby="historyTitle">
+      <div class="card" style="margin-bottom: 16px;">
+        <div class="section-head" style="margin-bottom: 10px;">
+          <div>
+            <h2 class="card-title" id="historyTitle" style="font-size: 20px;">나의 공강 시간표 기록</h2>
+            <p class="card-desc">저장된 날짜별·요일별 시간표를 확인하고 오늘 일정으로 바로 복사해 재사용할 수 있어요.</p>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="historyNewPlanBtn">+ 새 공강 계획하기</button>
+        </div>
+
+        <div id="sameWeekdayHistoryBanner" class="notice-box notice-mint" style="display: none; margin-top: 8px; margin-bottom: 14px;">
+          <span>🗓️</span>
+          <div style="flex: 1;" id="sameWeekdayHistoryText"></div>
+          <button type="button" class="btn btn-mint btn-xs" id="sameWeekdayReuseBtn">오늘로 복사 재사용</button>
+        </div>
+
+        <div class="history-toolbar">
+          <div class="weekday-filter-row" id="weekdayFilterRow">
+            <button type="button" class="chip-btn is-selected" data-weekday="all">전체</button>
+            <button type="button" class="chip-btn" data-weekday="월">월요일</button>
+            <button type="button" class="chip-btn" data-weekday="화">화요일</button>
+            <button type="button" class="chip-btn" data-weekday="수">수요일</button>
+            <button type="button" class="chip-btn" data-weekday="목">목요일</button>
+            <button type="button" class="chip-btn" data-weekday="금">금요일</button>
+            <button type="button" class="chip-btn" data-weekday="토">토요일</button>
+            <button type="button" class="chip-btn" data-weekday="일">일요일</button>
+          </div>
+          <span class="field-hint" id="historyStatsSummary">저장된 시간표 0개</span>
+        </div>
+      </div>
+
+      <div id="historyList" class="history-list"></div>
+    </section>
+  </main>
+
+  <!-- Modal: Edit / Add Activity -->
+  <div class="modal-backdrop" id="activityModal" role="dialog" aria-modal="true" aria-labelledby="activityModalTitle">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3 class="modal-title" id="activityModalTitle">활동 수정</h3>
+        <button type="button" class="modal-close" id="activityModalClose" aria-label="닫기">✕</button>
+      </div>
+      <form id="activityModalForm" class="modal-body">
+        <div class="field-group">
+          <label class="field-label" for="modalActTitle">활동 내용</label>
+          <input type="text" id="modalActTitle" class="input-control" placeholder="예: 전공 핵심 개념 정리" maxlength="80" required>
+        </div>
+        <div class="grid-2">
+          <div class="field-group">
+            <label class="field-label" for="modalActType">활동 종류</label>
+            <select id="modalActType" class="input-control">
+              <option value="공부">📘 공부 (블루)</option>
+              <option value="과제">📝 과제 (퍼플)</option>
+              <option value="운동">🏃 운동 (그린)</option>
+              <option value="식사">🍱 식사 (오렌지)</option>
+              <option value="휴식">☕ 휴식 (민트)</option>
+              <option value="개인 용무">🧾 개인 용무 (그레이)</option>
+              <option value="이동 및 준비">🚶 이동 및 준비 (뉴트럴)</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="modalActDuration">소요시간 (15분 단위)</label>
+            <select id="modalActDuration" class="input-control"></select>
+          </div>
+        </div>
+        <div class="field-group" id="modalInsertPosWrap" style="display: none;">
+          <label class="field-label" for="modalInsertPos">추가 위치</label>
+          <select id="modalInsertPos" class="input-control">
+            <option value="end">시간표 맨 뒤에 추가</option>
+            <option value="start">시간표 맨 앞에 추가</option>
+          </select>
+        </div>
+
+        <div id="modalBudgetInfo" class="notice-box notice-info" style="margin-top: 0;"></div>
+        <div id="modalConflictBox" class="notice-box notice-warn" style="display: none; margin-top: 0;"></div>
+
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary btn-sm" id="activityModalCancel">취소</button>
+          <button type="button" class="btn btn-mint btn-sm" id="activityModalAdjustSaveBtn" style="display: none;">다른 활동 자동 조정 후 저장</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="activityModalSaveBtn">저장하기</button>
+        </div>
+      </form>
+    </div>
   </div>
 
-  <!-- ==========================================================================
-       JAVASCRIPT APPLICATION LOGIC
-       ========================================================================== -->
-  <script src="app.js"></script>
+  <!-- Modal: Delete / Confirm -->
+  <div class="modal-backdrop" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3 class="modal-title" id="confirmModalTitle">확인</h3>
+        <button type="button" class="modal-close" id="confirmModalClose" aria-label="닫기">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmModalMessage" style="margin: 0; font-size: 14.5px; color: var(--text-sub); line-height: 1.6;"></p>
+      </div>
+      <div class="modal-foot" id="confirmModalFoot"></div>
+    </div>
+  </div>
+
+  <!-- Modal: Change Start Time -->
+  <div class="modal-backdrop" id="startTimeModal" role="dialog" aria-modal="true" aria-labelledby="startTimeModalTitle">
+    <div class="modal-dialog" style="max-width: 380px;">
+      <div class="modal-head">
+        <h3 class="modal-title" id="startTimeModalTitle">공강 시작 시간 변경</h3>
+        <button type="button" class="modal-close" id="startTimeModalClose" aria-label="닫기">✕</button>
+      </div>
+      <form id="startTimeModalForm" class="modal-body">
+        <div class="field-group">
+          <label class="field-label" for="modalNewStartTime">새 시작 시간</label>
+          <input type="time" id="modalNewStartTime" class="input-control" required>
+          <span class="field-hint">변경하면 모든 활동의 시작·종료 시간이 자동으로 함께 이동합니다.</span>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn btn-secondary btn-sm" id="startTimeModalCancel">취소</button>
+          <button type="submit" class="btn btn-primary btn-sm">시간 적용하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Timer Complete Alert -->
+  <div class="modal-backdrop" id="timerAlertModal" role="dialog" aria-modal="true" aria-labelledby="timerAlertTitle">
+    <div class="modal-dialog">
+      <div class="modal-head">
+        <h3 class="modal-title" id="timerAlertTitle">⏰ 활동 시간이 종료되었습니다!</h3>
+        <button type="button" class="modal-close" id="timerAlertClose" aria-label="닫기">✕</button>
+      </div>
+      <div class="modal-body">
+        <p id="timerAlertFinishedName" style="margin: 0; font-size: 15px; font-weight: 700; color: var(--navy-900);"></p>
+        <div id="timerAlertNextBox" class="notice-box notice-info" style="margin-top: 0;"></div>
+        <p class="tiny-note" style="margin: 0;">실제 수행 여부는 활동 카드의 완료 체크 버튼으로 직접 표시해 주세요.</p>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-secondary btn-sm" id="timerAlertOkBtn">확인</button>
+        <button type="button" class="btn btn-primary btn-sm" id="timerAlertNextBtn" style="display: none;">다음 활동으로 이동</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <script src="app.js" defer></script>
 </body>
 </html>

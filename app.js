@@ -1,1246 +1,2728 @@
-/* 1. Global State */
-    const state = {
-      startTime: "13:00",
-      duration: 120, // 30 ~ 240
-      location: "school", // school, home, transit
-      condition: "normal", // tired, normal, energetic
-      goal: "study", // study, assignment, exercise, meal, rest, errand
-      memo: "",
-      scheduleItems: [],
-      completedItems: new Set(),
-      lastUsedIds: new Set() // For ensuring fresh variety upon re-recommendation
-    };
+(function () {
+  'use strict';
 
-    const locationLabels = {
-      school: { label: "학교", icon: "🏫" },
-      home: { label: "집", icon: "🏠" },
-      transit: { label: "이동 중", icon: "🚌" }
-    };
+  /* ==================== CONSTANTS & METADATA ==================== */
+  const STORAGE_KEY_SCHEDULES = 'gaptime_schedules_v1';
+  const STORAGE_KEY_ACTIVE_ID = 'gaptime_active_id_v1';
+  const STORAGE_KEY_TIMER = 'gaptime_timer_v1';
+  const STORAGE_KEY_DRAFT = 'gaptime_input_draft_v1';
+  const STORAGE_KEY_VIEW = 'gaptime_active_view_v1';
 
-    const conditionLabels = {
-      tired: { label: "매우 피곤함", icon: "🥱" },
-      normal: { label: "보통", icon: "😊" },
-      energetic: { label: "활기참", icon: "⚡" }
-    };
+  const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+  const PRIORITY_WEIGHTS = [5, 3, 2, 1, 1, 1];
 
-    const goalLabels = {
-      study: { label: "공부", icon: "📖" },
-      assignment: { label: "과제", icon: "💻" },
-      exercise: { label: "운동", icon: "🏃‍♂️" },
-      meal: { label: "식사", icon: "🍱" },
-      rest: { label: "휴식", icon: "🛋️" },
-      errand: { label: "개인 용무", icon: "📋" }
-    };
+  const CATEGORIES = {
+    '공부': {
+      key: 'study',
+      emoji: '📘',
+      color: '#2563EB',
+      bg: '#EFF6FF',
+      border: '#BFDBFE',
+      desc: '전공 복습·영어·문제 풀이'
+    },
+    '과제': {
+      key: 'assignment',
+      emoji: '📝',
+      color: '#7C3AED',
+      bg: '#F5F3FF',
+      border: '#DDD6FE',
+      desc: '자료 정리·보고서·제출 점검'
+    },
+    '운동': {
+      key: 'exercise',
+      emoji: '🏃',
+      color: '#16A34A',
+      bg: '#F0FDF4',
+      border: '#BBF7D0',
+      desc: '스트레칭·걷기·러닝·헬스'
+    },
+    '식사': {
+      key: 'meal',
+      emoji: '🍱',
+      color: '#EA580C',
+      bg: '#FFF7ED',
+      border: '#FED7AA',
+      desc: '식사 확보·이동 및 정리'
+    },
+    '휴식': {
+      key: 'rest',
+      emoji: '☕',
+      color: '#0D9488',
+      bg: '#F0FDFA',
+      border: '#99F6E4',
+      desc: '낮잠·음악·산책·리프레시'
+    },
+    '개인 용무': {
+      key: 'errand',
+      emoji: '🧾',
+      color: '#475569',
+      bg: '#F1F5F9',
+      border: '#CBD5E1',
+      desc: '은행·인쇄·도서 반납·구매'
+    },
+    '이동 및 준비': {
+      key: 'prep',
+      emoji: '🚶',
+      color: '#78716C',
+      bg: '#F5F5F4',
+      border: '#D6D3D1',
+      desc: '장소 이동·정리·다음 수업 준비'
+    }
+  };
 
-    /* 2. Screen Navigation (Immediate Top Reset without Lag/Gap) */
-    function goToScreen(screenName) {
-      document.querySelectorAll(".screen").forEach(el => {
-        el.classList.remove("active");
-      });
-      const target = document.getElementById(`screen-${screenName}`);
-      if (target) {
-        target.classList.add("active");
+  const GOAL_LIST = ['공부', '과제', '운동', '식사', '휴식', '개인 용무'];
+
+  /* Rich Activity Templates keyed by Goal -> Location -> Condition (or fallback) */
+  const ACTIVITY_TEMPLATES = {
+    '공부': {
+      '학교': {
+        '매우 피곤함': [
+          { title: '강의 슬라이드 가볍게 훑어보기', reason: '피곤할 때는 새 진도보다 도서관이나 빈 강의실에서 가벼운 복습이 부담 없이 기억에 남아요.' },
+          { title: '핵심 키워드 노트 요약 정리', reason: '긴 문제 풀이 대신 핵심 용어만 빠르게 짚어 집중력을 아끼며 복습해요.' },
+          { title: '오답 노트·기출 포인트 가볍게 확인', reason: '컨디션이 낮을 때도 짧게 성취감을 얻기 좋은 학교 내 복습 루틴이에요.' }
+        ],
+        '보통': [
+          { title: '도서관 전공 강의 핵심 복습', reason: '학교 도서관의 차분한 분위기 속에서 방금 들은 수업 내용을 바로 정리하면 기억 효율이 높아요.' },
+          { title: '영어 단어·회화 표현 집중 암기', reason: '공강시간을 활용해 매일 조금씩 어학 감각을 끌어올리기 좋아요.' },
+          { title: '전공 교재 예제 및 문제 풀이', reason: '안정적인 컨디션일 때 직접 손을 움직여 문제를 풀면 실전 감각이 빠르게 붙어요.' }
+        ],
+        '활기참': [
+          { title: '고난도 전공 연습문제 집중 풀이', reason: '활기찬 컨디션과 학교 학습 공간을 살려 가장 집중력이 필요한 문제를 돌파해 보세요.' },
+          { title: '시험 대비 핵심 단원 심화 정리', reason: '에너지가 충분할 때 어려운 개념을 구조화해 두면 시험 기간이 훨씬 편해져요.' },
+          { title: '외국어·전공 모의 테스트 타임어택', reason: '높은 집중력을 발휘해 제한 시간 내 실력을 점검하기 딱 좋아요.' }
+        ]
+      },
+      '집': {
+        '매우 피곤함': [
+          { title: '편안한 자세로 강의 녹음·필기 가볍게 복습', reason: '집의 편안한 환경에서 무리하지 않고 핵심 흐름만 다시 떠올려요.' },
+          { title: '짧은 플래시카드·단어 가볍게 훑기', reason: '피로감을 줄이면서 오늘의 학습 루틴을 놓치지 않는 가벼운 활동이에요.' }
+        ],
+        '보통': [
+          { title: '책상에서 전공 수업 내용 체계적 복습', reason: '조용한 집 책상에서 방해 없이 오늘 배운 내용을 정리하기 좋아요.' },
+          { title: '온라인 강의 보충 및 요약 노트 작성', reason: '집중하기 좋은 집 환경에서 밀린 강의를 차분히 따라잡아요.' }
+        ],
+        '활기참': [
+          { title: '시험 대비 핵심 파트 몰입 학습', reason: '집에서의 높은 집중력과 활기찬 컨디션을 결합해 깊이 있는 공부를 진행해요.' },
+          { title: '전공 문제집 1챕터 완주 풀이', reason: '외부 소음 없는 환경에서 에너지 있게 한 단원을 끝낼 수 있어요.' }
+        ]
+      },
+      '이동 중': {
+        '매우 피곤함': [
+          { title: '이어폰으로 짧은 강의 오디오·팟캐스트 청취', reason: '이동 중 피곤할 때는 화면을 오래 보지 않고 눈을 쉬며 귀로 듣는 방식이 가장 안전하고 편해요.' },
+          { title: '오늘 배운 핵심 3줄 머릿속으로 되새기기', reason: '대중교통 이동 중 눈의 피로 없이 가볍게 기억을 정리할 수 있어요.' }
+        ],
+        '보통': [
+          { title: '대중교통에서 요약 강의 자료 훑어보기', reason: '대중교통 이용 중 짧게 핵심 슬라이드나 암기 카드를 확인하기 알맞아요. (운전 시에는 청취로 대체하세요)' },
+          { title: '어학 리스닝·단어 음성 복습', reason: '이동 시간을 알차게 쓰면서도 안전하게 학습할 수 있는 오디오 중심 활동이에요.' }
+        ],
+        '활기참': [
+          { title: '대중교통 내 모바일 퀴즈·단어 테스트', reason: '컨디션이 좋을 때 대중교통에서 짧은 퀴즈로 학습 리듬을 유지해 보세요. (보행·운전 중 조작 금지)' },
+          { title: '핵심 요약 PDF 정독 및 체크 (대중교통 착석 시)', reason: '자리에서 안정적으로 이동 중이라면 다음 수업 예습 자료를 미리 읽어두면 좋아요.' }
+        ]
       }
-      // Instant reset to eliminate any previous screen scroll position
-      window.scrollTo(0, 0);
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-      const appContainer = document.querySelector(".app-container");
-      if (appContainer) appContainer.scrollTop = 0;
+    },
+    '과제': {
+      '학교': {
+        '매우 피곤함': [
+          { title: '과제 요구사항 체크 및 참고 자료 폴더 정리', reason: '피곤할 때는 바로 글을 쓰기보다 과제 틀과 자료를 정리해 두면 다음 작업이 훨씬 수월해져요.' },
+          { title: '제출물 오탈자·파일 형식 최종 점검', reason: '적은 에너지로도 실수를 방지할 수 있는 마무리 과제 작업이에요.' }
+        ],
+        '보통': [
+          { title: '과제 목차 구성 및 본문 초안 작성', reason: '학교에서 수업 기억이 생생할 때 과제의 뼈대와 초안을 잡아두면 완성 속도가 빨라져요.' },
+          { title: '학술 자료 검색 및 인용 출처 정리', reason: '교내 네트워크와 도서관 자료를 활용해 과제의 근거 자료를 빠르게 모아요.' }
+        ],
+        '활기참': [
+          { title: '보고서·발표 자료 핵심 파트 집중 완성', reason: '에너지가 넘칠 때 가장 품이 많이 드는 본론 작성이나 슬라이드 제작을 한 번에 밀어붙여요.' },
+          { title: '팀 프로젝트 담당 분량 몰입 구현 및 점검', reason: '활기찬 컨디션을 살려 완성도 높은 결과물을 빠르게 만들어 내기 좋아요.' }
+        ]
+      },
+      '집': {
+        '매우 피곤함': [
+          { title: '과제 체크리스트 작성 및 자료 북마크 정리', reason: '집에서 쉬면서 부담 없이 과제 진행 단계를 나누고 준비해 둬요.' },
+          { title: '작성한 과제 문단 다듬기 및 제출 점검', reason: '무리한 신규 작성보다 가벼운 교정으로 마감 안정감을 높여요.' }
+        ],
+        '보통': [
+          { title: '집중 환경에서 과제 보고서 초안 작성', reason: '집 책상에서 필요한 도구를 모두 펼치고 차분하게 과제를 진전시켜요.' },
+          { title: '참고 문헌 정리 및 도표·이미지 삽입', reason: '꼼꼼한 손길이 필요한 과제 편집 작업을 안정적으로 처리하기 좋아요.' }
+        ],
+        '활기참': [
+          { title: '과제 본문 완결 및 제출 전 최종 검수', reason: '집중력이 최고조인 집 환경에서 과제 마감을 깔끔하게 끝내버릴 수 있어요.' },
+          { title: '발표 대본·슬라이드 고품질 디자인 마무리', reason: '활기찬 컨디션으로 시각 자료와 발표 흐름까지 완성도를 끌어올려요.' }
+        ]
+      },
+      '이동 중': {
+        '매우 피곤함': [
+          { title: '음성 메모로 과제 아이디어 키워드만 기록', reason: '이동 중 피로할 때는 길게 타이핑하지 않고 짧은 음성이나 핵심 단어만 남겨 안전을 지켜요.' }
+        ],
+        '보통': [
+          { title: '대중교통에서 과제 개요·발표 흐름 구상', reason: '대중교통 이용 중 머릿속으로 보고서 구조나 발표 멘트를 정리해 두면 도착 후 바로 쓸 수 있어요.' },
+          { title: '과제 참고 자료 목록 확인 및 체크리스트 점검', reason: '화면 조작을 최소화하면서 필요한 자료가 무엇인지 파악하기 좋아요.' }
+        ],
+        '활기참': [
+          { title: '대중교통 착석 상태에서 과제 소제목·개요 메모', reason: '안정적인 대중교통 환경에서 과제 뼈대를 잡아두면 목적지 도착 즉시 본문 작성에 들어갈 수 있어요.' }
+        ]
+      }
+    },
+    '운동': {
+      '학교': {
+        '매우 피곤함': [
+          { title: '캠퍼스 잔디·산책로 천천히 걷기 & 목·어깨 스트레칭', reason: '매우 피곤할 때는 격한 운동보다 가벼운 산책과 뭉친 근육 이완이 피로 해소에 좋아요.' }
+        ],
+        '보통': [
+          { title: '캠퍼스 빠른 걸음 워킹 & 전신 스트레칭', reason: '장시간 수업으로 굳은 몸을 적당한 강도로 풀어 다음 수업 집중력을 높여줘요.' },
+          { title: '교내 트랙·운동장 가벼운 조깅 및 쿨다운', reason: '학교 시설을 활용해 땀을 살짝 내며 활력을 끌어올리기 좋아요.' }
+        ],
+        '활기참': [
+          { title: '교내 헬스장·체육시설 근력 및 유산소 루틴', reason: '활기찬 컨디션에 맞춰 교내 운동시설에서 제대로 체력을 단련해 보세요.' },
+          { title: '교내 러닝 코스 페이스 러닝 & 코어 운동', reason: '에너지가 충분할 때 심폐지구력을 키우는 적극적인 운동이 잘 어울려요.' }
+        ]
+      },
+      '집': {
+        '매우 피곤함': [
+          { title: '요가 매트 위 가벼운 전신 이완 스트레칭', reason: '집에서 편안하게 누워 허리와 다리 피로를 풀어주는 저강도 회복 루틴이에요.' }
+        ],
+        '보통': [
+          { title: '홈트레이닝 스트레칭 + 기본 코어 루틴', reason: '집에서 별도 장비 없이 적당한 땀을 내며 몸의 균형을 잡기 좋아요.' },
+          { title: '집 주변 공원·동네 가벼운 산책', reason: '실내 공기를 환기하고 햇빛을 쬐며 기분 전환까지 챙겨요.' }
+        ],
+        '활기참': [
+          { title: '고강도 홈트(스쿼트·플랭크·버피) 집중 세트', reason: '집에서 눈치 보지 않고 활기찬 에너지를 온전히 쏟아낼 수 있어요.' },
+          { title: '동네 러닝 코스 달리기 및 마무리 스트레칭', reason: '컨디션이 최상일 때 야외 러닝으로 상쾌한 성취감을 얻어 보세요.' }
+        ]
+      },
+      '이동 중': {
+        '매우 피곤함': [
+          { title: '하차 후 서두르지 않고 바른 자세로 가볍게 걷기', reason: '이동 중에는 무리한 운동 대신 호흡을 고르고 바른 자세로 천천히 걷는 것이 안전해요.' }
+        ],
+        '보통': [
+          { title: '한 정거장 먼저 내려 활기차게 도보 이동', reason: '이동 동선 자체를 가벼운 유산소 운동으로 바꾸는 똑똑한 공강 활용법이에요.' }
+        ],
+        '활기참': [
+          { title: '도보 구간 파워 워킹 & 도착 후 전신 스트레칭', reason: '이동 동선 중 안전한 보행 구간에서 빠른 걸음으로 운동 효과를 챙겨보세요.' }
+        ]
+      }
+    },
+    '식사': {
+      '학교': {
+        '매우 피곤함': [
+          { title: '학식·교내 식당에서 따뜻하고 소화가 잘되는 식사', reason: '피곤할 때는 멀리 이동하지 않고 가까운 교내 식당에서 든든히 챙겨 먹는 게 최고예요.' }
+        ],
+        '보통': [
+          { title: '교내 식당 또는 학교 앞 맛집 균형 잡힌 식사', reason: '오후 일정을 버틸 에너지를 보충하고 식사 후 가볍게 정리할 시간까지 확보해요.' }
+        ],
+        '활기참': [
+          { title: '영양 균형 맞춘 든든한 식사 & 식후 짧은 산책', reason: '든든하게 식사를 해결하고 다음 일정으로 깔끔하게 이어갈 수 있도록 구성했어요.' }
+        ]
+      },
+      '집': {
+        '매우 피곤함': [
+          { title: '간편하고 따뜻한 집밥·건강식 식사 및 정리', reason: '조리 부담이 적은 메뉴로 빠르게 체력을 보충하고 설거지까지 가볍게 마쳐요.' }
+        ],
+        '보통': [
+          { title: '집에서 직접 챙기는 균형 잡힌 식사 & 정리', reason: '집의 여유를 살려 편안하게 식사하고 뒷정리까지 깔끔하게 끝내요.' }
+        ],
+        '활기참': [
+          { title: '단백질·채소 챙긴 건강 요리 & 깔끔한 정리', reason: '활기찬 에너지를 바탕으로 맛과 영양을 모두 잡은 식사를 만들어 보세요.' }
+        ]
+      },
+      '이동 중': {
+        '매우 피곤함': [
+          { title: '이동 경로 내 매장에서 따뜻한 간편식·음료 챙기기', reason: '이동 중 무리하지 않고 잠시 앉아 속을 편하게 채울 수 있는 안전한 식사 시간이에요.' }
+        ],
+        '보통': [
+          { title: '역·정류장 인근에서 균형 잡힌 간단 식사', reason: '동선 손실 없이 다음 장소로 넘어가기 전에 에너지를 알맞게 보충해요.' }
+        ],
+        '활기참': [
+          { title: '경로상 맛집·베이커리에서 든든한 식사 및 이동 준비', reason: '이동 동선 안에 있는 식사 스팟을 활용해 시간 낭비 없이 식사를 해결해요.' }
+        ]
+      }
+    },
+    '휴식': {
+      '학교': {
+        '매우 피곤함': [
+          { title: '교내 휴게공간·라운지 파워 낮잠 및 눈 휴식', reason: '피곤함이 누적됐을 때는 15~30분 짧은 낮잠과 눈 감기 휴식이 이후 집중력을 극적으로 살려줘요.' },
+          { title: '잔잔한 음악 감상하며 카페에서 멍 때리기', reason: '머리를 비우고 뇌에 잠깐의 쉼표를 주는 회복 시간이에요.' }
+        ],
+        '보통': [
+          { title: '캠퍼스 벤치 산책 & 좋아하는 음악 감상', reason: '햇빛 아래 잠시 걸으며 시각과 정신적 피로를 산뜻하게 전환해요.' },
+          { title: '따뜻한 음료 한 잔과 가벼운 휴식', reason: '수업과 다음 일정 사이에 여유를 두어 컨디션을 일정하게 유지해요.' }
+        ],
+        '활기참': [
+          { title: '캠퍼스 내 좋아하는 플레이리스트 감상 & 여유 타임', reason: '컨디션이 좋을 때도 짧은 리프레시 시간을 넣으면 하루 끝까지 지치지 않아요.' }
+        ]
+      },
+      '집': {
+        '매우 피곤함': [
+          { title: '알람 맞춘 꿀잠 낮잠 및 기분 전환 샤워·휴식', reason: '집이라는 최고의 휴식 공간에서 가장 효과적으로 피로를 씻어내는 시간이에요.' },
+          { title: '침대·소파에서 눈 감고 명상 & 잔잔한 음악', reason: '스크린에서 벗어나 눈과 몸을 완전히 쉬게 해줘요.' }
+        ],
+        '보통': [
+          { title: '좋아하는 음악·웹툰·커피와 함께하는 여유 휴식', reason: '집에서 편안하게 기분을 환기하며 다음 일정을 준비해요.' }
+        ],
+        '활기참': [
+          { title: '잠깐의 티타임 및 창밖 보며 가벼운 리프레시', reason: '에너지가 높을 때 페이스 조절을 위한 산뜻한 휴식을 배치했어요.' }
+        ]
+      },
+      '이동 중': {
+        '매우 피곤함': [
+          { title: '대중교통 좌석에서 눈 감고 잔잔한 음악·ASMR 듣기', reason: '이동 중 가장 안전하고 효과적으로 눈과 뇌의 피로를 덜어주는 휴식 방법이에요.' }
+        ],
+        '보통': [
+          { title: '창밖 풍경 보며 좋아하는 플레이리스트 감상', reason: '스마트폰 화면을 내려놓고 이동 시간을 기분 좋은 쉼표로 바꿔보세요.' }
+        ],
+        '활기참': [
+          { title: '좋아하는 라디오·오디오 콘텐츠 들으며 리프레시', reason: '시야를 방해하지 않는 청각 휴식으로 안전과 여유를 동시에 챙겨요.' }
+        ]
+      }
+    },
+    '개인 용무': {
+      '학교': {
+        '매우 피곤함': [
+          { title: '교내 무인 출력기 인쇄·도서관 반납 간단 처리', reason: '학교 안에서 동선 낭비 없이 금방 끝낼 수 있는 필수 용무만 깔끔히 처리해요.' }
+        ],
+        '보통': [
+          { title: '교내 은행·행정실 용무 및 강의자료 인쇄', reason: '수업 시간에는 처리하기 힘든 캠퍼스 내 행정·인쇄·도서 대출을 공강에 해결해요.' },
+          { title: '교내 매점·서점에서 필요한 학용품·생필품 구매', reason: '이동 거리를 최소화하면서 미뤄둔 필요한 물품을 챙겨요.' }
+        ],
+        '활기참': [
+          { title: '은행 업무 + 도서 대출/반납 + 인쇄 한 번에 클리어', reason: '활기찬 에너지를 발휘해 밀린 교내 개인 용무를 빠르게 연속 처리해요.' }
+        ]
+      },
+      '집': {
+        '매우 피곤함': [
+          { title: '모바일 뱅킹·필수 신청서 온라인 간단 처리', reason: '외출하지 않고 집에서 꼭 필요한 금융·행정 일만 손쉽게 끝내요.' }
+        ],
+        '보통': [
+          { title: '방·책상 간단 정돈 및 온라인 생필품 주문', reason: '생활 환경을 정돈하고 필요한 물품을 주문해 다음 주를 편하게 준비해요.' },
+          { title: '근처 은행·우체국·편의점 택배 등 생활 용무', reason: '집 근처에서 처리해야 할 개인 용무를 깔끔하게 해결해요.' }
+        ],
+        '활기참': [
+          { title: '책상 대청소 + 밀린 은행/배송/예약 업무 일괄 처리', reason: '에너지가 충분할 때 생활과 관련된 잡무를 한꺼번에 털어내면 마음이 가벼워져요.' }
+        ]
+      },
+      '이동 중': {
+        '매우 피곤함': [
+          { title: '할 일 목록 확인 및 도착 후 처리할 용무 체크', reason: '이동 중 무리한 모바일 결제는 피하고, 도착해서 바로 처리할 체크리스트만 가볍게 확인해요.' }
+        ],
+        '보통': [
+          { title: '경로상 정류장 근처 물품 픽업 또는 일정 정리', reason: '이동 동선에 겹치는 간단한 용무나 주간 일정 정리를 안전하게 처리해요. (운전 시 제외)' }
+        ],
+        '활기참': [
+          { title: '환승 구간 편의점·은행 ATM 들르기 및 일정 조율', reason: '이동 경로 내 짧은 경유지로 미뤄뒀던 용무를 효율적으로 해결해 보세요.' }
+        ]
+      }
+    }
+  };
+
+  const PREP_TEMPLATES = {
+    '학교': [
+      '강의실·도서관 이동 및 다음 수업 준비·정리',
+      '자리 정리 및 다음 강의 자료 미리 챙기기'
+    ],
+    '집': [
+      '작업 공간 정돈 및 다음 일정 준비',
+      '물 한 잔 마시고 다음 일정 동선 정리'
+    ],
+    '이동 중': [
+      '목적지 하차 준비 및 도착 후 동선 체크',
+      '소지품 점검 및 다음 장소 이동 마무리'
+    ]
+  };
+
+  const AUTO_BREAK_TEMPLATES = {
+    '학교': '중간 휴식 · 스트레칭 및 물 마시기',
+    '집': '중간 휴식 · 환기하고 눈 잠시 쉬기',
+    '이동 중': '중간 휴식 · 화면 끄고 호흡 고르기'
+  };
+
+  /* ==================== STATE ==================== */
+  let state = {
+    activeView: 'home',
+    input: {
+      date: '',
+      startTime: '10:30',
+      duration: 120,
+      location: '학교',
+      condition: '보통',
+      goals: ['공부', '과제'],
+      memo: ''
+    },
+    variationSeed: 0,
+    schedules: [], // all saved schedules
+    activeScheduleId: null,
+    historyWeekdayFilter: 'all',
+    timer: {
+      scheduleId: null,
+      activityId: null,
+      status: 'idle', // idle | running | paused | ended
+      durationSeconds: 0,
+      remainingSeconds: 0,
+      endTimestamp: null
+    },
+    storageError: null
+  };
+
+  let timerIntervalHandle = null;
+  let audioCtx = null;
+  let modalContext = null; // { mode: 'edit'|'add', activityId: string|null, pendingAdjustedPlan: null }
+
+  /* ==================== SAFE LOCAL STORAGE ==================== */
+  function safeGetStorage(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (err) {
+      state.storageError = '브라우저 저장소에 접근할 수 없습니다.';
+      return null;
+    }
+  }
+
+  function safeSetStorage(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+      state.storageError = null;
+      return true;
+    } catch (err) {
+      state.storageError = '저장 공간이 부족하거나 브라우저 설정으로 저장에 실패했습니다.';
+      showToast(state.storageError, 'error');
+      return false;
+    }
+  }
+
+  function loadAllFromStorage() {
+    // Schedules
+    const rawSchedules = safeGetStorage(STORAGE_KEY_SCHEDULES);
+    if (rawSchedules) {
+      try {
+        const parsed = JSON.parse(rawSchedules);
+        if (Array.isArray(parsed)) {
+          state.schedules = parsed.filter(isValidScheduleRecord);
+        } else {
+          throw new Error('Invalid schedule array');
+        }
+      } catch (e) {
+        state.schedules = [];
+        showToast('저장된 시간표 데이터를 읽는 중 문제가 있어 초기화했습니다.', 'warn');
+      }
     }
 
-    /* 3. Input Controls & Event Handlers */
-    const startTimeInput = document.getElementById("startTimeInput");
-    const timeKoreanDisplay = document.getElementById("timeKoreanDisplay");
-    const durationSlider = document.getElementById("durationSlider");
-    const durationDisplay = document.getElementById("durationDisplay");
-    const durationMinutesDisplay = document.getElementById("durationMinutesDisplay");
-    const customMemoInput = document.getElementById("customMemoInput");
+    // Active ID
+    const savedActiveId = safeGetStorage(STORAGE_KEY_ACTIVE_ID);
+    if (savedActiveId && state.schedules.some(s => s.id === savedActiveId)) {
+      state.activeScheduleId = savedActiveId;
+    } else if (state.schedules.length > 0) {
+      state.activeScheduleId = state.schedules[0].id;
+    }
 
-    startTimeInput.addEventListener("input", (e) => {
-      state.startTime = e.target.value;
-      updateTimeKoreanDisplay(e.target.value);
-      updateQuickTimeActiveState();
-      hideValidationAlert();
+    // Draft input
+    const rawDraft = safeGetStorage(STORAGE_KEY_DRAFT);
+    if (rawDraft) {
+      try {
+        const draft = JSON.parse(rawDraft);
+        if (draft && typeof draft === 'object') {
+          if (typeof draft.startTime === 'string' && /^\d{2}:\d{2}$/.test(draft.startTime)) {
+            state.input.startTime = draft.startTime;
+          }
+          if (typeof draft.duration === 'number' && draft.duration >= 0 && draft.duration <= 240 && draft.duration % 15 === 0) {
+            state.input.duration = draft.duration;
+          }
+          if (['학교', '집', '이동 중'].includes(draft.location)) {
+            state.input.location = draft.location;
+          }
+          if (['매우 피곤함', '보통', '활기참'].includes(draft.condition)) {
+            state.input.condition = draft.condition;
+          }
+          if (Array.isArray(draft.goals)) {
+            const validGoals = draft.goals.filter(g => GOAL_LIST.includes(g));
+            state.input.goals = validGoals;
+          }
+          if (typeof draft.memo === 'string') {
+            state.input.memo = draft.memo;
+          }
+          if (typeof draft.date === 'string' && parseLocalDate(draft.date)) {
+            state.input.date = draft.date;
+          }
+        }
+      } catch (e) {
+        // Ignore bad draft
+      }
+    }
+    if (!state.input.date || !parseLocalDate(state.input.date)) {
+      state.input.date = getTodayLocalDateStr();
+    }
+
+    // Timer
+    const rawTimer = safeGetStorage(STORAGE_KEY_TIMER);
+    if (rawTimer) {
+      try {
+        const t = JSON.parse(rawTimer);
+        if (t && typeof t === 'object' && t.scheduleId && t.activityId) {
+          const owner = state.schedules.find(s => s.id === t.scheduleId);
+          const act = owner ? owner.activities.find(a => a.id === t.activityId) : null;
+          if (owner && act) {
+            state.timer = {
+              scheduleId: t.scheduleId,
+              activityId: t.activityId,
+              status: ['running', 'paused', 'ended'].includes(t.status) ? t.status : 'idle',
+              durationSeconds: Number(t.durationSeconds) || act.duration * 60,
+              remainingSeconds: Number(t.remainingSeconds) || 0,
+              endTimestamp: typeof t.endTimestamp === 'number' ? t.endTimestamp : null
+            };
+          }
+        }
+      } catch (e) {
+        // Ignore bad timer JSON
+      }
+    }
+  }
+
+  function isValidScheduleRecord(rec) {
+    return rec &&
+      typeof rec.id === 'string' &&
+      typeof rec.date === 'string' &&
+      typeof rec.startTime === 'string' &&
+      typeof rec.duration === 'number' &&
+      Array.isArray(rec.activities);
+  }
+
+  function persistSchedules(statusLabel) {
+    const ok = safeSetStorage(STORAGE_KEY_SCHEDULES, JSON.stringify(state.schedules));
+    if (state.activeScheduleId) {
+      safeSetStorage(STORAGE_KEY_ACTIVE_ID, state.activeScheduleId);
+    }
+    if (ok) {
+      updateSaveStatusUI(statusLabel || '자동 저장 완료');
+    }
+    updateBadges();
+  }
+
+  function persistDraft() {
+    safeSetStorage(STORAGE_KEY_DRAFT, JSON.stringify(state.input));
+  }
+
+  function persistTimer() {
+    safeSetStorage(STORAGE_KEY_TIMER, JSON.stringify(state.timer));
+  }
+
+  /* ==================== LOCAL DATE & TIME HELPERS ==================== */
+  function getTodayLocalDateStr() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function getCurrentLocalTimeStr() {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  }
+
+  function parseLocalDate(dateStr) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+      return null;
+    }
+    return dt;
+  }
+
+  function getWeekdayKo(dateStr) {
+    const dt = parseLocalDate(dateStr);
+    if (!dt) return '';
+    return WEEKDAYS[dt.getDay()];
+  }
+
+  function formatKoreanDate(dateStr) {
+    const dt = parseLocalDate(dateStr);
+    if (!dt) return '유효하지 않은 날짜';
+    const y = dt.getFullYear();
+    const m = dt.getMonth() + 1;
+    const d = dt.getDate();
+    const w = WEEKDAYS[dt.getDay()];
+    return `${y}년 ${m}월 ${d}일 (${w})`;
+  }
+
+  function formatKoreanTime(hhmm) {
+    if (!/^\d{2}:\d{2}$/.test(hhmm)) return '';
+    const [h, m] = hhmm.split(':').map(Number);
+    const period = h < 12 ? '오전' : '오후';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    if (m === 0) return `${period} ${h12}시`;
+    return `${period} ${h12}시 ${m}분`;
+  }
+
+  function formatDuration(minutes) {
+    const m = Number(minutes) || 0;
+    if (m === 0) return '0분';
+    const hrs = Math.floor(m / 60);
+    const mins = m % 60;
+    if (hrs === 0) return `${mins}분`;
+    if (mins === 0) return `${hrs}시간`;
+    return `${hrs}시간 ${mins}분`;
+  }
+
+  function addMinutesToTime(startHHMM, offsetMinutes) {
+    const [sh, sm] = startHHMM.split(':').map(Number);
+    const total = sh * 60 + sm + offsetMinutes;
+    const dayOffset = Math.floor(total / 1440);
+    const mod = ((total % 1440) + 1440) % 1440;
+    const eh = String(Math.floor(mod / 60)).padStart(2, '0');
+    const em = String(mod % 60).padStart(2, '0');
+    return {
+      hhmm: `${eh}:${em}`,
+      dayOffset
+    };
+  }
+
+  function formatLocalTimestampNow() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+  }
+
+  function formatSecondsMMSS(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  function generateUniqueId(prefix) {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  /* ==================== TIME ALLOCATION & SCHEDULE ENGINE ==================== */
+  function parseMemoTasks(memoStr) {
+    if (!memoStr || !memoStr.trim()) return [];
+    const parts = memoStr
+      .split(/[,/\n;]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const keywordRules = [
+      { goal: '과제', words: ['과제', '레포트', '보고서', '발표', 'ppt', '피피티', '코딩', '제출', '초안', '팀플'] },
+      { goal: '공부', words: ['공부', '복습', '예습', '단어', '암기', '시험', '기출', '문제', '강의', '교재', '장', '챕터', '영어', '수학', '토익'] },
+      { goal: '운동', words: ['운동', '헬스', '러닝', '산책', '걷기', '스트레칭', '요가', '조깅'] },
+      { goal: '식사', words: ['식사', '밥', '점심', '저녁', '아침', '학식', '간식', '카페', '커피'] },
+      { goal: '휴식', words: ['휴식', '낮잠', '잠', '쉬기', '음악', '명상'] },
+      { goal: '개인 용무', words: ['은행', '인쇄', '프린트', '출력', '대출', '반납', '구매', '쇼핑', '택배', '우체국', '병원', '예약', '행정'] }
+    ];
+    return parts.map(text => {
+      const lower = text.toLowerCase();
+      let matchedGoal = null;
+      for (const rule of keywordRules) {
+        if (rule.words.some(w => lower.includes(w))) {
+          matchedGoal = rule.goal;
+          break;
+        }
+      }
+      return { text, matchedGoal };
+    });
+  }
+
+  /**
+   * Allocates totalMinutes (multiple of 15) across prioritized goals, plus realistic prep & break blocks.
+   * Strictly guarantees:
+   * 1. 15-min increments
+   * 2. Sum === totalMinutes
+   * 3. Higher priority goals receive >= (and for Rank 1 vs Rank 2 when >= 2 included, strictly >) lower priority goals
+   * 4. Lower priority goals omitted cleanly with explanations if time is too short
+   */
+  function allocateTimeBudget(totalMinutes, orderedGoals, condition) {
+    const totalUnits = Math.floor(totalMinutes / 15);
+    const hasExplicitRest = orderedGoals.includes('휴식');
+
+    let prepUnits = 0;
+    let breakUnits = 0;
+
+    if (totalUnits >= 6) {
+      // 90분 이상: 이동 및 준비 15분 확보
+      prepUnits = 1;
+    }
+    if (totalUnits >= 10 && !hasExplicitRest) {
+      // 150분 이상이고 사용자가 휴식을 직접 넣지 않았다면 중간 휴식 확보
+      breakUnits = condition === '매우 피곤함' && totalUnits >= 12 ? 2 : 1;
+    }
+
+    let goalUnits = totalUnits - prepUnits - breakUnits;
+    if (goalUnits < 1) {
+      prepUnits = 0;
+      breakUnits = 0;
+      goalUnits = totalUnits;
+    }
+
+    // Determine maximum number of goals that can fit while keeping Rank 1 strictly > Rank 2 (when k >= 2)
+    // Minimum units needed for k goals with u_1 >= 2 and u_2..k >= 1: k === 1 ? 1 : (k + 1)
+    let maxFit = 1;
+    for (let k = orderedGoals.length; k >= 1; k--) {
+      const minRequired = k === 1 ? 1 : k + 1;
+      if (goalUnits >= minRequired) {
+        maxFit = k;
+        break;
+      }
+    }
+
+    const includedGoals = orderedGoals.slice(0, maxFit);
+    const omittedGoals = orderedGoals.slice(maxFit).map((g, idx) => {
+      const rank = maxFit + idx + 1;
+      return {
+        goal: g,
+        rank,
+        reason: `${rank}순위 '${g}' 목표는 총 공강시간(${formatDuration(totalMinutes)}) 안에서 상위 순위 목표에 충분한 시간을 배분하기 위해 이번 일정에서는 제외되었어요.`
+      };
     });
 
-    function setTime(timeStr) {
-      startTimeInput.value = timeStr;
-      state.startTime = timeStr;
-      updateTimeKoreanDisplay(timeStr);
-      updateQuickTimeActiveState();
-      hideValidationAlert();
+    // Allocate units across includedGoals
+    const units = new Array(includedGoals.length).fill(1);
+    if (includedGoals.length >= 2) {
+      units[0] = 2; // Ensure Rank 1 > Rank 2 from the start
     }
+    let assigned = units.reduce((a, b) => a + b, 0);
+    let remaining = goalUnits - assigned;
 
-    function setCurrentTime() {
-      const now = new Date();
-      let hours = now.getHours();
-      let mins = Math.round(now.getMinutes() / 15) * 15;
-      if (mins >= 60) {
-        hours = (hours + 1) % 24;
-        mins = 0;
+    const weights = includedGoals.map((_, i) => PRIORITY_WEIGHTS[i] ?? 1);
+    const weightSum = weights.reduce((a, b) => a + b, 0);
+    const targets = weights.map(w => (goalUnits * w) / weightSum);
+
+    while (remaining > 0) {
+      let bestIdx = -1;
+      let bestDeficit = -Infinity;
+
+      for (let i = 0; i < includedGoals.length; i++) {
+        // Monotonicity guard:
+        // - For i > 0, units[i] + 1 must not exceed units[i - 1]
+        // - Specifically for i === 1, units[1] + 1 must stay strictly less than units[0]
+        if (i === 1 && units[1] + 1 >= units[0]) continue;
+        if (i > 1 && units[i] + 1 > units[i - 1]) continue;
+
+        const deficit = targets[i] - units[i];
+        if (deficit > bestDeficit + 1e-9) {
+          bestDeficit = deficit;
+          bestIdx = i;
+        }
       }
-      const timeStr = `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
-      setTime(timeStr);
+
+      if (bestIdx === -1) {
+        // Fallback to Rank 1 so Rank 1 absorbs remaining while staying strictly top
+        bestIdx = 0;
+      }
+
+      units[bestIdx] += 1;
+      remaining -= 1;
     }
 
-    function updateTimeKoreanDisplay(timeStr) {
-      if (!timeStr) return;
-      const [h, m] = timeStr.split(":").map(Number);
-      const ampm = h < 12 ? "오전" : (h === 12 ? "낮" : "오후");
-      const displayH = h % 12 === 0 ? 12 : h % 12;
-      const displayM = m === 0 ? "00" : String(m).padStart(2, "0");
-      timeKoreanDisplay.textContent = `${ampm} ${displayH}:${displayM}`;
-    }
+    const goalAllocations = includedGoals.map((goal, idx) => ({
+      goal,
+      rank: idx + 1,
+      weight: weights[idx],
+      minutes: units[idx] * 15
+    }));
 
-    function updateQuickTimeActiveState() {
-      const val = startTimeInput.value;
-      document.querySelectorAll(".time-quick-btn").forEach(btn => {
-        btn.classList.toggle("active", btn.getAttribute("onclick")?.includes(`'${val}'`));
-      });
-    }
+    return {
+      goalAllocations,
+      omittedGoals,
+      prepMinutes: prepUnits * 15,
+      breakMinutes: breakUnits * 15
+    };
+  }
 
-    function handleSliderChange(val) {
-      const minutes = parseInt(val, 10);
-      state.duration = minutes;
-      updateDurationUI(minutes);
-    }
+  function pickTemplate(pool, seedOffset) {
+    if (!pool || pool.length === 0) return null;
+    return pool[Math.abs(seedOffset) % pool.length];
+  }
 
-    function setPresetDuration(minutes) {
-      durationSlider.value = minutes;
-      state.duration = minutes;
-      updateDurationUI(minutes);
-    }
+  function buildScheduleFromInput(inputData, seed) {
+    const { date, startTime, duration, location, condition, goals, memo } = inputData;
+    const alloc = allocateTimeBudget(duration, goals, condition);
+    const parsedMemo = parseMemoTasks(memo);
+    const usedMemoIdx = new Set();
 
-    function updateDurationUI(minutes) {
-      const hours = Math.floor(minutes / 60);
-      const remainMins = minutes % 60;
-      let text = "";
-      if (hours > 0 && remainMins > 0) {
-        text = `${hours}시간 ${remainMins}분`;
-      } else if (hours > 0) {
-        text = `${hours}시간`;
+    // Split long goal allocations (>= 75m for Study/Assignment/Exercise) into realistic blocks when helpful
+    const activityBlocks = [];
+
+    alloc.goalAllocations.forEach((ga, gIdx) => {
+      const catPool = (ACTIVITY_TEMPLATES[ga.goal] &&
+        ACTIVITY_TEMPLATES[ga.goal][location] &&
+        ACTIVITY_TEMPLATES[ga.goal][location][condition]) ||
+        [{ title: `${ga.goal} 집중 활동`, reason: `${location}에서 ${condition} 컨디션에 맞춰 진행합니다.` }];
+
+      // Find matching memo item for this goal
+      let matchedMemo = null;
+      for (let i = 0; i < parsedMemo.length; i++) {
+        if (!usedMemoIdx.has(i) && parsedMemo[i].matchedGoal === ga.goal) {
+          matchedMemo = parsedMemo[i];
+          usedMemoIdx.add(i);
+          break;
+        }
+      }
+      // If Rank 1 and still unused unmatched memo item exists, assign it to Rank 1
+      if (!matchedMemo && gIdx === 0) {
+        for (let i = 0; i < parsedMemo.length; i++) {
+          if (!usedMemoIdx.has(i) && parsedMemo[i].matchedGoal === null) {
+            matchedMemo = parsedMemo[i];
+            usedMemoIdx.add(i);
+            break;
+          }
+        }
+      }
+
+      const shouldSplit = ga.minutes >= 75 && ['공부', '과제', '운동'].includes(ga.goal) && catPool.length >= 2;
+      if (shouldSplit) {
+        const firstUnits = Math.ceil((ga.minutes / 15) / 2);
+        const firstMin = firstUnits * 15;
+        const secondMin = ga.minutes - firstMin;
+
+        const tpl1 = pickTemplate(catPool, seed + gIdx);
+        const tpl2 = pickTemplate(catPool, seed + gIdx + 1);
+
+        const title1 = matchedMemo ? `${matchedMemo.text} (${tpl1.title})` : tpl1.title;
+        const reason1 = matchedMemo
+          ? `메모하신 '${matchedMemo.text}' 내용을 반영했어요. ${tpl1.reason}`
+          : tpl1.reason;
+
+        activityBlocks.push({
+          id: generateUniqueId('act'),
+          goalTag: ga.goal,
+          type: ga.goal,
+          duration: firstMin,
+          title: title1,
+          reason: reason1,
+          completed: false,
+          priorityRank: ga.rank
+        });
+
+        activityBlocks.push({
+          id: generateUniqueId('act'),
+          goalTag: ga.goal,
+          type: ga.goal,
+          duration: secondMin,
+          title: tpl2.title,
+          reason: `${ga.rank}순위 목표 시간을 두 단계로 나누어 집중력이 떨어지지 않도록 구성했어요. ${tpl2.reason}`,
+          completed: false,
+          priorityRank: ga.rank
+        });
       } else {
-        text = `${remainMins}분`;
-      }
-      durationDisplay.textContent = text;
-      durationMinutesDisplay.textContent = `(${minutes}분)`;
+        const tpl = pickTemplate(catPool, seed + gIdx);
+        const title = matchedMemo ? `${matchedMemo.text} · ${tpl.title}` : tpl.title;
+        const reason = matchedMemo
+          ? `입력하신 메모('${matchedMemo.text}')를 ${ga.rank}순위 '${ga.goal}' 일정에 직접 반영했어요. ${tpl.reason}`
+          : tpl.reason;
 
-      document.querySelectorAll(".preset-btn").forEach(btn => {
-        const btnMins = parseInt(btn.getAttribute("onclick")?.match(/\d+/)?.[0] || "0", 10);
-        btn.classList.toggle("active", btnMins === minutes);
+        activityBlocks.push({
+          id: generateUniqueId('act'),
+          goalTag: ga.goal,
+          type: ga.goal,
+          duration: ga.minutes,
+          title,
+          reason,
+          completed: false,
+          priorityRank: ga.rank
+        });
+      }
+    });
+
+    // Interleave explicit '휴식' or auto breakUnits realistically between heavy tasks
+    let arranged = [];
+    const restIndex = activityBlocks.findIndex(b => b.type === '휴식');
+    if (restIndex !== -1 && activityBlocks.length >= 3 && restIndex === activityBlocks.length - 1) {
+      const restBlock = activityBlocks.splice(restIndex, 1)[0];
+      const mid = Math.ceil(activityBlocks.length / 2);
+      arranged = [
+        ...activityBlocks.slice(0, mid),
+        restBlock,
+        ...activityBlocks.slice(mid)
+      ];
+    } else {
+      arranged = [...activityBlocks];
+    }
+
+    // Insert auto intermediate break if reserved
+    if (alloc.breakMinutes > 0) {
+      const midIdx = Math.max(1, Math.floor(arranged.length / 2));
+      arranged.splice(midIdx, 0, {
+        id: generateUniqueId('act'),
+        goalTag: '중간 휴식',
+        type: '휴식',
+        duration: alloc.breakMinutes,
+        title: AUTO_BREAK_TEMPLATES[location] || '잠깐 숨 고르기 & 중간 휴식',
+        reason: `${formatDuration(duration)}의 긴 공강 동안 집중력이 흐트러지지 않도록 중간 회복 시간을 확보했어요.`,
+        completed: false,
+        isAutoBuffer: true
       });
     }
 
-    function selectOption(category, value) {
-      state[category] = value;
-      const selector = category === "goal" ? ".goal-card" : `#section-${category} .option-card`;
-      document.querySelectorAll(selector).forEach(card => {
-        card.classList.toggle("selected", card.getAttribute("data-value") === value);
-      });
-      hideValidationAlert();
-    }
-
-    function showValidationAlert(message) {
-      const alertBox = document.getElementById("validationAlert");
-      const alertText = document.getElementById("validationAlertText");
-      alertText.textContent = message;
-      alertBox.style.display = "flex";
-      alertBox.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-
-    function hideValidationAlert() {
-      document.getElementById("validationAlert").style.display = "none";
-    }
-
-    /* ==========================================================================
-       4. COMPREHENSIVE ACTIVITY DATABASE (Context-Aware, Location-Strict)
-       ========================================================================== */
-    const activityDatabase = [
-      /* --- STUDY (학교, 집, 이동 중) --- */
-      {
-        id: "sch_lib_focus",
-        title: "도서관 열람실 초집중 전공 공부",
-        category: "학업 집중",
-        icon: "📚",
-        locations: ["school"],
-        conditions: ["normal", "energetic"],
-        goals: ["study"],
-        intensity: "high",
-        reason: "학구열 넘치는 도서관 열람실에서 방해 요소 없이 핵심 개념과 문제 풀이를 정복합니다."
-      },
-      {
-        id: "sch_lecture_review",
-        title: "오늘 수강한 강의 핵심 노트 단권화",
-        category: "강의 복습",
-        icon: "✍️",
-        locations: ["school"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["study"],
-        intensity: "medium",
-        reason: "수업 직후 망각 곡선이 가팔라지기 전, 필기를 훑어보며 핵심 키워드를 머릿속에 각인합니다."
-      },
-      {
-        id: "sch_empty_room_exam",
-        title: "빈 강의실 기출문제 실전 모의 풀이",
-        category: "시험 대비",
-        icon: "📝",
-        locations: ["school"],
-        conditions: ["normal", "energetic"],
-        goals: ["study"],
-        intensity: "high",
-        reason: "실제 시험장과 유사한 빈 강의실 환경에서 타이머를 맞추고 족보와 기출을 격파합니다."
-      },
-      {
-        id: "sch_toeic_listening",
-        title: "교내 어학 라운지 토익/오픽 리스닝",
-        category: "어학 스터디",
-        icon: "🎧",
-        locations: ["school"],
-        conditions: ["tired", "normal"],
-        goals: ["study"],
-        intensity: "light",
-        reason: "헤드폰을 착용하고 편안한 소파에서 파트별 리스닝 음원을 들으며 귀를 트이게 합니다."
-      },
-      {
-        id: "home_desk_pomodoro",
-        title: "내 방 책상 뽀모도로 몰입 스터디",
-        category: "개인 스터디",
-        icon: "🖥️",
-        locations: ["home"],
-        conditions: ["normal", "energetic"],
-        goals: ["study"],
-        intensity: "high",
-        reason: "조용하고 익숙한 내 방에서 타이머를 켜고 딴짓 없이 단숨에 목표 챕터를 끝냅니다."
-      },
-      {
-        id: "home_online_lecture",
-        title: "녹화 온라인 강의 1.25배속 집중 수강",
-        category: "인강 수강",
-        icon: "💻",
-        locations: ["home"],
-        conditions: ["normal", "energetic"],
-        goals: ["study"],
-        intensity: "medium",
-        reason: "밀렸던 온라인 강의를 배속 재생으로 빠르게 소화하고 퀴즈 과제까지 완료합니다."
-      },
-      {
-        id: "home_tablet_light_study",
-        title: "소파에서 태블릿 강의 슬라이드 훑어보기",
-        category: "가벼운 복습",
-        icon: "📱",
-        locations: ["home"],
-        conditions: ["tired", "normal"],
-        goals: ["study"],
-        intensity: "light",
-        reason: "몸에 부담을 주지 않도록 편안한 자세로 핵심 요약 슬라이드를 가볍게 복습합니다."
-      },
-      {
-        id: "transit_flashcards",
-        title: "스마트폰 암기 앱 영단어·필수 공식 체크",
-        category: "모바일 학습",
-        icon: "📱",
-        locations: ["transit"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["study"],
-        intensity: "light",
-        reason: "이동 중 흔들림 속에서도 스마트폰으로 단어나 핵심 요약본을 안전하고 손쉽게 넘겨봅니다."
-      },
-      {
-        id: "transit_audio_lecture",
-        title: "이어폰으로 교양 팟캐스트 & 강의 녹음 청취",
-        category: "오디오 학습",
-        icon: "🎧",
-        locations: ["transit"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["study"],
-        intensity: "light",
-        reason: "눈의 피로를 덜어주면서 이어폰으로 강의 음원을 들어 이동 시간을 알차게 바꿉니다."
-      },
-
-      /* --- ASSIGNMENT (과제) --- */
-      {
-        id: "sch_pc_lab_report",
-        title: "PC랩실 학술 DB 검색 & 리포트 초안 작성",
-        category: "과제 리서치",
-        icon: "💻",
-        locations: ["school"],
-        conditions: ["normal", "energetic"],
-        goals: ["assignment"],
-        intensity: "high",
-        reason: "교내 학술 논문 DB 무료 열람과 빠른 PC 환경을 활용해 막막했던 리포트 뼈대를 세웁니다."
-      },
-      {
-        id: "sch_team_project_ppt",
-        title: "조별과제 발표 PPT 슬라이드 구성 & 디자인",
-        category: "팀플/발표",
-        icon: "📊",
-        locations: ["school"],
-        conditions: ["normal", "energetic"],
-        goals: ["assignment"],
-        intensity: "high",
-        reason: "팀원들과 분담한 발표 자료를 일목요연한 템플릿에 맞추어 디자인합니다."
-      },
-      {
-        id: "sch_report_check",
-        title: "과제 제출 전 맞춤법·출처 표기 최종 점검",
-        category: "과제 마무리",
-        icon: "📄",
-        locations: ["school"],
-        conditions: ["tired", "normal"],
-        goals: ["assignment"],
-        intensity: "light",
-        reason: "과제 마감 전 감점 요인이 되는 오탈자와 참고문헌 각주 양식을 꼼꼼하게 다듬습니다."
-      },
-      {
-        id: "home_dual_report_writing",
-        title: "듀얼 모니터로 과제 본문 속전속결 집필",
-        category: "과제 집필",
-        icon: "⌨️",
-        locations: ["home"],
-        conditions: ["normal", "energetic"],
-        goals: ["assignment"],
-        intensity: "high",
-        reason: "넓은 화면에서 레퍼런스를 띄워두고 방해받지 않는 환경에서 빠르게 과제를 써 내려갑니다."
-      },
-      {
-        id: "home_report_proofread",
-        title: "과제 출력물 퇴고 및 피드백 수정 반영",
-        category: "과제 완성",
-        icon: "📑",
-        locations: ["home"],
-        conditions: ["tired", "normal"],
-        goals: ["assignment"],
-        intensity: "medium",
-        reason: "작성된 글을 소리 내어 읽어보며 문맥이 어색한 문장을 매끄럽게 교정합니다."
-      },
-      {
-        id: "transit_assignment_brainstorm",
-        title: "메모 앱에 과제 아이디어 개요 & 브레인스토밍",
-        category: "모바일 기획",
-        icon: "💡",
-        locations: ["transit"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["assignment"],
-        intensity: "light",
-        reason: "이동 중에 문득 떠오르는 창의적인 아이디어를 메모장에 구조화해 두어 작성 시간을 절약합니다."
-      },
-      {
-        id: "transit_team_chat_sync",
-        title: "팀플 단톡방 진행 현황 공유 및 역할 조율",
-        category: "팀플 커뮤니케이션",
-        icon: "💬",
-        locations: ["transit"],
-        conditions: ["tired", "normal"],
-        goals: ["assignment"],
-        intensity: "light",
-        reason: "이동하는 자투리 시간에 팀원들의 진행 상황을 확인하고 다음 회의 안건을 정리합니다."
-      },
-
-      /* --- EXERCISE (운동) --- */
-      {
-        id: "sch_gym_weight",
-        title: "교내 헬스장 / 체육관 웨이트 트레이닝",
-        category: "근력 운동",
-        icon: "🏋️‍♂️",
-        locations: ["school"],
-        conditions: ["energetic"],
-        goals: ["exercise"],
-        intensity: "high",
-        reason: "컨디션이 가장 좋을 때 교내 체육시설을 이용해 3대 루틴을 알차게 수행합니다."
-      },
-      {
-        id: "sch_campus_walk",
-        title: "캠퍼스 둘레길 & 잔디밭 파워 워킹",
-        category: "유산소 산책",
-        icon: "👟",
-        locations: ["school"],
-        conditions: ["normal", "energetic"],
-        goals: ["exercise"],
-        intensity: "medium",
-        reason: "맑은 공기를 마시며 캠퍼스를 걸어 굳어있던 하체를 풀고 뇌에 신선한 산소를 공급합니다."
-      },
-      {
-        id: "sch_bench_light_stretch",
-        title: "캠퍼스 그늘 벤치 전신 이완 스트레칭",
-        category: "가벼운 릴랙스",
-        icon: "🧘",
-        locations: ["school"],
-        conditions: ["tired", "normal"],
-        goals: ["exercise", "rest"],
-        intensity: "light",
-        reason: "강의실 의자에 오래 앉아 경직된 목과 어깨를 시원하게 펴주며 피로를 해소합니다."
-      },
-      {
-        id: "home_mat_workout",
-        title: "요가매트 홈트레이닝 코어 루틴",
-        category: "홈 트레이닝",
-        icon: "🤸‍♂️",
-        locations: ["home"],
-        conditions: ["normal", "energetic"],
-        goals: ["exercise"],
-        intensity: "high",
-        reason: "집에서 편한 복장으로 플랭크, 스쿼트 등 코어와 전신 근육을 활성화합니다."
-      },
-      {
-        id: "home_foam_roller",
-        title: "폼롤러 전신 근막 이완 & 거북목 스트레칭",
-        category: "체형 교정",
-        icon: "🧘‍♀️",
-        locations: ["home"],
-        conditions: ["tired", "normal"],
-        goals: ["exercise", "rest"],
-        intensity: "light",
-        reason: "무리한 운동 대신 뭉친 척추와 승모근을 부드럽게 마사지해 즉각적인 개운함을 얻습니다."
-      },
-      {
-        id: "transit_stair_climbing",
-        title: "환승 통로 계단 오르기 (에스컬레이터 패스)",
-        category: "생활 속 유산소",
-        icon: "🚶",
-        locations: ["transit"],
-        conditions: ["normal", "energetic"],
-        goals: ["exercise"],
-        intensity: "light",
-        reason: "이동 경로 자체를 계단 걷기 운동으로 전환하여 안전하게 하체 근력을 단련합니다."
-      },
-      {
-        id: "transit_seated_stretching",
-        title: "좌석 바른 자세 유지 & 발목·어깨 틈새 스트레칭",
-        category: "틈새 바디케어",
-        icon: "🙆‍♂️",
-        locations: ["transit"],
-        conditions: ["tired", "normal"],
-        goals: ["exercise", "rest"],
-        intensity: "light",
-        reason: "좌석에 앉아 주변에 방해되지 않도록 발목을 돌리고 어깨를 뒤로 젖혀 붓기를 예방합니다."
-      },
-
-      /* --- MEAL (식사) --- */
-      {
-        id: "sch_cafeteria_meal",
-        title: "학생식당 든든한 가성비 점심 식사",
-        category: "교내 식사",
-        icon: "🍛",
-        locations: ["school"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["meal"],
-        intensity: "medium",
-        reason: "가성비 좋고 영양 균형 잡힌 학식으로 오후 강의를 버틸 든든한 에너지를 충전합니다."
-      },
-      {
-        id: "sch_cafe_sandwich",
-        title: "교내 카페 신선한 샌드위치 & 아메리카노",
-        category: "간편 식사 & 커피",
-        icon: "🥪",
-        locations: ["school"],
-        conditions: ["tired", "normal"],
-        goals: ["meal", "rest"],
-        intensity: "light",
-        reason: "혼밥도 부담 없는 아늑한 카페에서 신선한 샌드위치와 카페인 충전을 함께 즐깁니다."
-      },
-      {
-        id: "home_cooked_lunch",
-        title: "따뜻한 집밥 차려먹기 & 과일 후식",
-        category: "영양 만점 식사",
-        icon: "🍳",
-        locations: ["home"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["meal"],
-        intensity: "medium",
-        reason: "자취방이나 집에서 편안한 옷을 입고 여유롭게 건강한 식사를 챙겨 먹습니다."
-      },
-      {
-        id: "home_quick_healthy_bowl",
-        title: "샐러드 & 닭가슴살 간편 건강 식단",
-        category: "클린 식단",
-        icon: "🥗",
-        locations: ["home"],
-        conditions: ["tired", "normal"],
-        goals: ["meal"],
-        intensity: "light",
-        reason: "조리와 정리가 간편한 식단으로 위장에 부담 없이 빠르게 에너지를 보충합니다."
-      },
-      {
-        id: "transit_protein_snack",
-        title: "편의점 단백질 음료 & 견과류 간편 보충",
-        category: "에너지 간편식",
-        icon: "🥤",
-        locations: ["transit"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["meal"],
-        intensity: "light",
-        reason: "이동 중 냄새나지 않는 간편 음료와 스낵으로 출출함을 달래고 집중력을 유지합니다."
-      },
-
-      /* --- REST (휴식) --- */
-      {
-        id: "sch_powernap_lounge",
-        title: "학생회관 수면실 / 빈 라운지 20분 파워냅",
-        category: "급속 수면 충전",
-        icon: "😴",
-        locations: ["school"],
-        conditions: ["tired"],
-        goals: ["rest"],
-        intensity: "light",
-        reason: "20분 전후의 짧은 낮잠은 뇌 속 피로 물질을 청소하여 오후 집중력을 두 배로 높여줍니다."
-      },
-      {
-        id: "sch_bench_mindfulness",
-        title: "캠퍼스 잔디밭 그늘 벤치 바람 쐬며 멍때리기",
-        category: "멘탈 디톡스",
-        icon: "🌿",
-        locations: ["school"],
-        conditions: ["tired", "normal"],
-        goals: ["rest"],
-        intensity: "light",
-        reason: "스마트폰을 잠시 내려놓고 자연 바람을 느끼며 복잡했던 머릿속을 차분하게 비웁니다."
-      },
-      {
-        id: "home_bed_powernap",
-        title: "침대 암막 커튼 치고 포근한 수면 충전",
-        category: "완벽한 휴식",
-        icon: "🛏️",
-        locations: ["home"],
-        conditions: ["tired", "normal"],
-        goals: ["rest"],
-        intensity: "light",
-        reason: "가장 편안한 내 침대에서 온몸의 긴장을 완전히 내려놓고 깊은 재충전 시간을 갖습니다."
-      },
-      {
-        id: "home_sofa_music",
-        title: "푹신한 소파에서 좋아하는 앨범 전곡 감상",
-        category: "음악 힐링",
-        icon: "🎶",
-        locations: ["home"],
-        conditions: ["tired", "normal"],
-        goals: ["rest"],
-        intensity: "light",
-        reason: "눈을 감고 좋아하는 음악에 몰입하며 수업 스트레스를 기분 좋게 날려버립니다."
-      },
-      {
-        id: "transit_noise_canceling",
-        title: "노이즈 캔슬링 힐링 플레이리스트 감상",
-        category: "사운드 테라피",
-        icon: "🎵",
-        locations: ["transit"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["rest"],
-        intensity: "light",
-        reason: "대중교통 소음을 차단하고 차분한 어쿠스틱/로파이 음악으로 마음의 여유를 찾습니다."
-      },
-      {
-        id: "transit_scenic_meditation",
-        title: "창밖 풍경 바라보며 가벼운 눈 마사지 & 멍때리기",
-        category: "안구 힐링",
-        icon: "🪟",
-        locations: ["transit"],
-        conditions: ["tired", "normal"],
-        goals: ["rest"],
-        intensity: "light",
-        reason: "모니터와 책에서 벗어나 먼 곳을 바라보며 지친 눈 근육을 부드럽게 이완시킵니다."
-      },
-
-      /* --- ERRAND (개인 용무) --- */
-      {
-        id: "sch_print_documents",
-        title: "도서관/복사실 수업 자료 및 과제 출력",
-        category: "출력/인쇄 용무",
-        icon: "🖨️",
-        locations: ["school"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["errand"],
-        intensity: "medium",
-        reason: "수업 직전 붐비는 프린트실 대신 공강 시간을 활용해 여유롭게 출력물을 준비합니다."
-      },
-      {
-        id: "sch_library_return",
-        title: "중앙도서관 책 대출·반납 및 참고문헌 탐색",
-        category: "도서관 용무",
-        icon: "📖",
-        locations: ["school"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["errand"],
-        intensity: "medium",
-        reason: "연체되기 전 대출 도서를 반납하고 다음 주 과제에 필요한 도서를 미리 대여합니다."
-      },
-      {
-        id: "home_room_cleaning",
-        title: "빨래 돌리기 & 책상 주변 환기 및 분리수거",
-        category: "생활 공간 정돈",
-        icon: "🧹",
-        locations: ["home"],
-        conditions: ["normal", "energetic"],
-        goals: ["errand"],
-        intensity: "medium",
-        reason: "어질러진 공간을 깨끗하게 정리하면 시각적 스트레스가 해소되고 집중력이 향상됩니다."
-      },
-      {
-        id: "transit_mobile_banking",
-        title: "모바일 금융 송금 & 가계부/영수증 정리",
-        category: "모바일 용무",
-        icon: "💳",
-        locations: ["transit", "school", "home"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["errand"],
-        intensity: "light",
-        reason: "자투리 이동 시간 동안 계좌 이체, 영수증 처리, 월간 지출을 모바일로 정리합니다."
-      },
-      {
-        id: "transit_calendar_organize",
-        title: "스마트폰 캘린더 이번 주 과제·시험 마감 점검",
-        category: "일정 관리",
-        icon: "📅",
-        locations: ["transit", "school", "home"],
-        conditions: ["tired", "normal", "energetic"],
-        goals: ["errand"],
-        intensity: "light",
-        reason: "놓치기 쉬운 과제 제출일과 스터디 약속을 캘린더에 동기화해 완벽한 주간 계획을 세웁니다."
+    // Add realistic transition / prep block if reserved
+    if (alloc.prepMinutes > 0) {
+      const prepTitle = pickTemplate(PREP_TEMPLATES[location], seed) || '장소 이동 및 다음 일정 준비';
+      const prepBlock = {
+        id: generateUniqueId('act'),
+        goalTag: '이동 및 준비',
+        type: '이동 및 준비',
+        duration: alloc.prepMinutes,
+        title: prepTitle,
+        reason: `공강 마무리를 서두르지 않고 다음 수업이나 일정을 여유 있게 준비할 수 있도록 ${alloc.prepMinutes}분을 배정했어요.`,
+        completed: false,
+        isAutoBuffer: true
+      };
+      if (location === '이동 중' && seed % 2 === 1) {
+        arranged.unshift(prepBlock);
+      } else {
+        arranged.push(prepBlock);
       }
+    }
+
+    // Recompute exact timestamps
+    const timedActivities = computeTimelineTimes(startTime, arranged);
+
+    const greeting = buildAssistantGreeting(inputData, alloc, seed);
+    const reasonSummary = buildReasonSummary(inputData, alloc);
+
+    const record = {
+      id: generateUniqueId('sched'),
+      date,
+      dayOfWeek: getWeekdayKo(date),
+      startTime,
+      duration,
+      location,
+      condition,
+      goals: [...goals],
+      priorities: alloc.goalAllocations,
+      omittedGoals: alloc.omittedGoals,
+      memo: memo.trim(),
+      greeting,
+      reasonSummary,
+      activities: timedActivities,
+      lastModified: formatLocalTimestampNow(),
+      lastModifiedMs: Date.now()
+    };
+    record.progress = computeProgress(record.activities);
+    return record;
+  }
+
+  function computeTimelineTimes(startHHMM, activities) {
+    let cursor = 0;
+    return activities.map(act => {
+      const startInfo = addMinutesToTime(startHHMM, cursor);
+      cursor += act.duration;
+      const endInfo = addMinutesToTime(startHHMM, cursor);
+      return {
+        ...act,
+        startTime: startInfo.hhmm,
+        startDayOffset: startInfo.dayOffset,
+        endTime: endInfo.hhmm,
+        endDayOffset: endInfo.dayOffset
+      };
+    });
+  }
+
+  function computeProgress(activities) {
+    const totalCount = activities.length;
+    const completedCount = activities.filter(a => a.completed).length;
+    const percent = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+    return { completedCount, totalCount, percent };
+  }
+
+  function hasBatchim(word) {
+    if (!word) return false;
+    const ch = word.charCodeAt(word.length - 1);
+    if (ch < 0xAC00 || ch > 0xD7A3) return false;
+    return (ch - 0xAC00) % 28 !== 0;
+  }
+
+  function pickJosa(word, withBatchim, withoutBatchim) {
+    return hasBatchim(word) ? withBatchim : withoutBatchim;
+  }
+
+  function buildAssistantGreeting(inputData, alloc, seed) {
+    const durText = formatDuration(inputData.duration);
+    const topGoal = alloc.goalAllocations[0].goal;
+    const secondGoal = alloc.goalAllocations[1] ? alloc.goalAllocations[1].goal : null;
+    const condTone = {
+      '매우 피곤함': '조금 피곤한 날이니 무리하지 않고 회복과 핵심만 챙기는 쪽으로',
+      '보통': '컨디션이 안정적이니 집중과 휴식의 균형을 딱 맞춰서',
+      '활기참': '에너지가 넘치는 날이니 평소보다 한 단계 더 알차게'
+    }[inputData.condition];
+
+    const locTone = {
+      '학교': '학교에서 바로 움직일 수 있게',
+      '집': '집의 편안한 집중 환경을 살려',
+      '이동 중': '대중교통 이동 중에도 안전하게 소화할 수 있도록'
+    }[inputData.location];
+
+    const topWa = pickJosa(topGoal, '과', '와');
+    const topEul = pickJosa(topGoal, '을', '를');
+    const variants = [
+      `오! 오늘 공강이 ${durText}이나 있네요! 😎 ${inputData.location}에 계시고 컨디션은 '${inputData.condition}' 상태시니, 1순위 '${topGoal}'${secondGoal ? `${topWa} 2순위 '${secondGoal}'` : ''} 중심으로 탄탄하게 짜봤어요. ${inputData.duration >= 90 ? '마무리 정리 시간까지 넉넉히 챙겼으니 편하게 따라와 보세요! ✨' : '짧고 굵게 알찬 시간 보내봐요! 💪'}`,
+      `반가워요! ${formatKoreanTime(inputData.startTime)}부터 시작되는 ${durText}의 공강시간, ${locTone} 딱 맞게 설계했어요. 🗓️ ${condTone} 1순위 '${topGoal}'에 가장 큰 비중을 두었답니다. 하나씩 완료 체크하면서 보람찬 공강 만들어봐요! ☕`,
+      `오늘 ${durText} 공강 비서 출동! ✨ ${inputData.location}에서 보내는 귀중한 시간, '${topGoal}'${topEul} 최우선으로 두고${secondGoal ? ` '${secondGoal}'까지` : ''} 알뜰하게 채웠어요. 컨디션이 '${inputData.condition}'인 점을 꼼꼼히 반영했으니 지금 바로 타이머와 함께 시작해 볼까요? 🚀`
     ];
 
-    /* Contextual Buffer Templates for Moving, Prep, Wrap-up */
-    const bufferTemplates = {
-      prep: {
-        school: { title: "교내 스팟 이동 및 필기도구/노트북 세팅", icon: "🎒", category: "이동 & 준비" },
-        home: { title: "책상 정리 및 쾌적한 학습/활동 환경 세팅", icon: "💻", category: "환경 세팅" },
-        transit: { title: "안전한 좌석/손잡이 확보 및 소지품 정돈", icon: "🚌", category: "이동 준비" }
-      },
-      mid: {
-        school: { title: "물 한 잔과 가벼운 목·어깨 기지개", icon: "☕", category: "리프레시" },
-        home: { title: "간식 한 입과 창문 환기 리프레시", icon: "🍵", category: "리프레시" },
-        transit: { title: "심호흡과 눈 피로 풀기 리프레시", icon: "🧘‍♂️", category: "리프레시" }
-      },
-      wrap: {
-        school: { title: "자리 정돈 & 다음 수업 강의실 여유 있게 이동", icon: "🚶‍♂️", category: "마무리 & 이동" },
-        home: { title: "소지품 가방 챙기기 & 다음 강의 출발 준비", icon: "🎒", category: "출발 준비" },
-        transit: { title: "목적지 도착 전 하차 준비 및 소지품 확인", icon: "🔔", category: "하차 준비" }
-      }
-    };
+    return variants[Math.abs(seed) % variants.length];
+  }
 
-    /* ==========================================================================
-       5. ALGORITHM: SCHEDULE GENERATOR (Strict Mathematical Match)
-       ========================================================================== */
-    function generateScheduleData(isRegenerate = false) {
-      const { startTime, duration, location, condition, goal, memo } = state;
+  function buildReasonSummary(inputData, alloc) {
+    const top = alloc.goalAllocations[0];
+    const parts = [
+      `${formatDuration(inputData.duration)}의 공강시간을 '${inputData.location}' 환경과 '${inputData.condition}' 컨디션에 맞춰 15분 단위로 구성했습니다.`,
+      `가장 높은 1순위 '${top.goal}'에 ${formatDuration(top.minutes)}을 우선 배정했고`
+    ];
+    if (alloc.goalAllocations.length > 1) {
+      const restNames = alloc.goalAllocations.slice(1).map(g => `${g.rank}순위 '${g.goal}'(${formatDuration(g.minutes)})`).join(', ');
+      parts.push(`이어서 ${restNames} 순으로 가중치를 반영했습니다.`);
+    } else {
+      parts.push(`선택한 목표에 온전히 집중할 수 있도록 배치했습니다.`);
+    }
+    if (alloc.prepMinutes > 0 || alloc.breakMinutes > 0) {
+      const extras = [];
+      if (alloc.breakMinutes > 0) extras.push(`중간 휴식 ${alloc.breakMinutes}분`);
+      if (alloc.prepMinutes > 0) extras.push(`이동 및 준비 ${alloc.prepMinutes}분`);
+      parts.push(`여기에 ${extras.join('과 ')}을 현실적으로 포함했습니다.`);
+    }
+    if (inputData.memo && inputData.memo.trim()) {
+      parts.push(`작성하신 메모('${inputData.memo.trim()}')도 활동에 반영했습니다.`);
+    }
+    return parts.join(' ');
+  }
 
-      // Filter eligible activities based on strict location & intensity safety
-      let eligible = activityDatabase.filter(act => {
-        if (!act.locations.includes(location)) return false;
-        // Safety: no high-intensity in transit
-        if (location === "transit" && act.intensity === "high") return false;
-        // Condition: no high-intensity when tired
-        if (condition === "tired" && act.intensity === "high") return false;
-        return true;
-      });
+  /* ==================== UI REFERENCES & VIEW SWITCHING ==================== */
+  function getActiveSchedule() {
+    if (!state.activeScheduleId) return null;
+    return state.schedules.find(s => s.id === state.activeScheduleId) || null;
+  }
 
-      // Goal specific candidates
-      let goalEligible = eligible.filter(act => act.goals.includes(goal));
-      if (goalEligible.length === 0) goalEligible = eligible;
+  function switchView(viewName) {
+    state.activeView = viewName;
+    safeSetStorage(STORAGE_KEY_VIEW, viewName);
+    document.querySelectorAll('.view-panel').forEach(el => {
+      el.classList.toggle('is-active', el.id === `view-${viewName}`);
+    });
+    document.querySelectorAll('.nav-tab').forEach(btn => {
+      btn.classList.toggle('is-active', btn.dataset.view === viewName);
+    });
 
-      // Refresh / Secondary candidates
-      let refreshEligible = eligible.filter(act => act.goals.includes("rest") || act.goals.includes("meal"));
-      if (refreshEligible.length === 0) refreshEligible = eligible;
+    // Reset scroll to very top on every view transition so content starts naturally below header
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
 
-      // On re-recommendation, prioritize candidates that were NOT used in last turn
-      function shuffleAndPrioritize(arr) {
-        let fresh = arr.filter(a => !state.lastUsedIds.has(a.id));
-        if (fresh.length === 0) fresh = arr;
-        return [...fresh].sort(() => Math.random() - 0.5);
-      }
+    if (viewName === 'input') {
+      renderInputView();
+    } else if (viewName === 'result') {
+      renderResultView();
+    } else if (viewName === 'history') {
+      renderHistoryView();
+    } else {
+      renderHomeView();
+    }
+  }
 
-      goalEligible = shuffleAndPrioritize(goalEligible);
-      refreshEligible = shuffleAndPrioritize(refreshEligible);
+  function updateBadges() {
+    const badge = document.getElementById('historyCountBadge');
+    if (badge) badge.textContent = String(state.schedules.length);
+  }
 
-      const prepInfo = bufferTemplates.prep[location] || bufferTemplates.prep.school;
-      const midInfo = bufferTemplates.mid[location] || bufferTemplates.mid.school;
-      const wrapInfo = bufferTemplates.wrap[location] || bufferTemplates.wrap.school;
+  function updateSaveStatusUI(text) {
+    const el = document.getElementById('saveStatusText');
+    if (el) {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      el.textContent = `${text} · ${hh}:${mm}`;
+    }
+  }
 
-      let blocks = [];
+  function showToast(message, variant) {
+    const container = document.getElementById('toastContainer');
+    container.innerHTML = '';
+    const toast = document.createElement('div');
+    toast.className = 'toast' + (variant === 'warn' ? ' is-warn' : variant === 'error' ? ' is-error' : '');
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity 0.22s ease';
+      setTimeout(() => {
+        if (toast.parentNode) toast.remove();
+      }, 240);
+    }, 2200);
+  }
 
-      if (duration === 30) {
-        const act = goalEligible[0] || eligible[0];
-        blocks.push({
-          activity: act,
-          minutes: 30,
-          customReason: generateReason(act, location, condition, goal, memo)
-        });
-      } else if (duration === 45) {
-        const act = goalEligible[0] || eligible[0];
-        blocks.push({
-          activity: act,
-          minutes: 35,
-          customReason: generateReason(act, location, condition, goal, memo)
-        });
-        blocks.push({
-          activity: { id: "buf_wrap", ...wrapInfo, reason: "다음 수업에 지각하지 않도록 여유 있게 호흡을 가다듬고 이동합니다." },
-          minutes: 10,
-          customReason: "다음 일정에 쫓기지 않도록 여유 있게 호흡을 가다듬고 정돈합니다."
-        });
-      } else if (duration === 60) {
-        const act = goalEligible[0] || eligible[0];
-        blocks.push({
-          activity: { id: "buf_prep", ...prepInfo, reason: "최적의 환경을 세팅하며 기분 좋은 워밍업을 시작합니다." },
-          minutes: 10,
-          customReason: "집중을 위한 도구와 환경을 정돈하며 공강을 산뜻하게 시작합니다."
-        });
-        blocks.push({
-          activity: act,
-          minutes: 40,
-          customReason: generateReason(act, location, condition, goal, memo)
-        });
-        blocks.push({
-          activity: { id: "buf_wrap", ...wrapInfo, reason: "소지품을 점검하고 여유로운 마음으로 다음 일정으로 전환합니다." },
-          minutes: 10,
-          customReason: "소지품을 점검하고 편안한 마음으로 다음 강의실로 이동합니다."
-        });
-      } else if (duration <= 90) { // 75, 90 mins
-        const act = goalEligible[0] || eligible[0];
-        const mainMins = duration - 30; // 10 prep + 10 mid + 10 wrap = 30
-        blocks.push({
-          activity: { id: "buf_prep", ...prepInfo },
-          minutes: 10,
-          customReason: "필요한 물품을 세팅하고 오늘 공강의 핵심 목표를 리마인드합니다."
-        });
-        blocks.push({
-          activity: act,
-          minutes: mainMins,
-          customReason: generateReason(act, location, condition, goal, memo)
-        });
-        blocks.push({
-          activity: { id: "buf_mid", ...midInfo },
-          minutes: 10,
-          customReason: "연속 집중 후의 뇌 피로를 물 한 모금과 가벼운 기지개로 날려줍니다."
-        });
-        blocks.push({
-          activity: { id: "buf_wrap", ...wrapInfo },
-          minutes: 10,
-          customReason: "공강 시간을 기분 좋게 마무리하고 다음 장소로 여유 있게 향합니다."
-        });
-      } else if (duration <= 135) { // 105, 120, 135 mins
-        const act1 = goalEligible[0] || eligible[0];
-        const act2 = goalEligible[1] || refreshEligible[0] || eligible[1] || act1;
-        const act2Mins = duration - 85; // 15 prep + 45 act1 + 15 mid + 10 wrap = 85
+  /* ==================== RENDER: HOME VIEW ==================== */
+  function renderHomeView() {
+    const resumeBtn = document.getElementById('homeResumeBtn');
+    const active = getActiveSchedule();
+    resumeBtn.style.display = active ? 'inline-flex' : 'none';
+  }
 
-        blocks.push({
-          activity: { id: "buf_prep", ...prepInfo },
-          minutes: 15,
-          customReason: "자리를 정돈하고 2시간 안팎의 공강을 알차게 보낼 환경을 세팅합니다."
-        });
-        blocks.push({
-          activity: act1,
-          minutes: 45,
-          customReason: generateReason(act1, location, condition, goal, memo)
-        });
-        blocks.push({
-          activity: { id: "buf_mid", ...midInfo },
-          minutes: 15,
-          customReason: "집중력이 자연스럽게 떨어지는 45분 시점에 맞춘 황금 휴식 타임입니다."
-        });
-        blocks.push({
-          activity: act2,
-          minutes: act2Mins,
-          customReason: generateReason(act2, location, condition, goal, memo, true)
-        });
-        blocks.push({
-          activity: { id: "buf_wrap", ...wrapInfo },
-          minutes: 10,
-          customReason: "오늘 달성한 일정을 체크하고 다음 강의실로 여유롭게 이동합니다."
-        });
-      } else if (duration <= 180) { // 150, 165, 180 mins (approx 3 hours)
-        const act1 = goalEligible[0] || eligible[0];
-        const midActivity = refreshEligible[0] || { id: "buf_mid", ...midInfo };
-        const act2 = goalEligible[1] || eligible[1] || act1;
+  /* ==================== RENDER: INPUT VIEW ==================== */
+  function renderInputView() {
+    const dateInput = document.getElementById('gapDateInput');
+    const timeInput = document.getElementById('gapStartTimeInput');
+    const memoInput = document.getElementById('memoInput');
 
-        const prepMins = 15;
-        const midBreakMins = 30;
-        const wrapMins = 15;
-        const remaining = duration - (prepMins + midBreakMins + wrapMins); // duration - 60
-        const part1 = Math.round(remaining * 0.55 / 15) * 15;
-        const part2 = remaining - part1;
+    dateInput.value = state.input.date;
+    timeInput.value = state.input.startTime;
+    memoInput.value = state.input.memo;
 
-        blocks.push({
-          activity: { id: "buf_prep", ...prepInfo },
-          minutes: prepMins,
-          customReason: "3시간의 넉넉한 공강 시간을 주도적으로 보내기 위한 준비 시간입니다."
-        });
-        blocks.push({
-          activity: act1,
-          minutes: part1,
-          customReason: generateReason(act1, location, condition, goal, memo)
-        });
-        blocks.push({
-          activity: midActivity,
-          minutes: midBreakMins,
-          customReason: "장시간 공강에서 꼭 필요한 중간 에너지 충전 및 편안한 리프레시입니다."
-        });
-        blocks.push({
-          activity: act2,
-          minutes: part2,
-          customReason: generateReason(act2, location, condition, goal, memo, true)
-        });
-        blocks.push({
-          activity: { id: "buf_wrap", ...wrapInfo },
-          minutes: wrapMins,
-          customReason: "오늘 하루의 성취를 정리하고 다음 수업을 차분히 맞이합니다."
-        });
-      } else { // 195, 210, 225, 240 mins (approx 4 hours)
-        const act1 = goalEligible[0] || eligible[0];
-        const mealOrRest = refreshEligible.find(a => a.goals.includes("meal")) || refreshEligible[0] || { id: "buf_mid", ...midInfo };
-        const act2 = goalEligible[1] || eligible[1] || act1;
-        const chillAct = refreshEligible.find(a => a.goals.includes("rest") && a.id !== mealOrRest.id) || { id: "buf_mid", ...midInfo };
+    updateDatePreviewUI();
+    updateStartTimePreviewUI();
+    syncDurationUI(state.input.duration);
+    renderChoiceSelections();
+    renderGoalsAndPriorityUI();
+    updateSubmitSummaryUI();
+    renderSameWeekdayHintOnInput();
+  }
 
-        const prepMins = 10;
-        const mealMins = 45;
-        const chillMins = 20;
-        const wrapMins = 15;
-        const remaining = duration - (prepMins + mealMins + chillMins + wrapMins);
-        const part1 = Math.round(remaining * 0.55 / 15) * 15;
-        const part2 = remaining - part1;
+  function updateDatePreviewUI() {
+    const preview = document.getElementById('selectedDatePreview');
+    const hint = document.getElementById('dateWeekdayHint');
+    const dt = parseLocalDate(state.input.date);
+    if (dt) {
+      preview.textContent = formatKoreanDate(state.input.date);
+      hint.textContent = `${getWeekdayKo(state.input.date)}요일`;
+    } else {
+      preview.textContent = '날짜를 선택해 주세요';
+      hint.textContent = '올바른 날짜 필요';
+    }
+  }
 
-        blocks.push({
-          activity: { id: "buf_prep", ...prepInfo },
-          minutes: prepMins,
-          customReason: "4시간 대공강을 후회 없이 보내기 위한 환경 세팅과 체크리스트 점검입니다."
-        });
-        blocks.push({
-          activity: act1,
-          minutes: part1,
-          customReason: generateReason(act1, location, condition, goal, memo)
-        });
-        blocks.push({
-          activity: mealOrRest,
-          minutes: mealMins,
-          customReason: "긴 공강 시간 동안 지치지 않도록 든든하게 식사와 소화를 챙기는 시간입니다."
-        });
-        blocks.push({
-          activity: act2,
-          minutes: part2,
-          customReason: generateReason(act2, location, condition, goal, memo, true)
-        });
-        blocks.push({
-          activity: chillAct,
-          minutes: chillMins,
-          customReason: "오후 강의 직전 머리를 식히고 편안한 호흡으로 릴랙스하는 시간입니다."
-        });
-        blocks.push({
-          activity: { id: "buf_wrap", ...wrapInfo },
-          minutes: wrapMins,
-          customReason: "소지품을 챙기고 여유로운 걸음으로 다음 강의실로 이동합니다."
-        });
-      }
+  function updateStartTimePreviewUI() {
+    const hint = document.getElementById('formattedStartTimeHint');
+    const formatted = formatKoreanTime(state.input.startTime);
+    hint.textContent = formatted || '시간 선택 필요';
 
-      // Mathematical Safety Check: ensure sum of minutes EXACTLY equals duration
-      const totalCalculated = blocks.reduce((sum, b) => sum + b.minutes, 0);
-      if (totalCalculated !== duration && blocks.length > 0) {
-        const diff = duration - totalCalculated;
-        blocks[blocks.length - 1].minutes += diff;
-      }
+    document.querySelectorAll('.start-preset-btn').forEach(btn => {
+      btn.classList.toggle('is-selected', btn.dataset.time === state.input.startTime);
+    });
+    updateDurationSpanPreview();
+  }
 
-      // Save IDs for variety tracking
-      state.lastUsedIds.clear();
-      blocks.forEach(b => {
-        if (b.activity && b.activity.id) state.lastUsedIds.add(b.activity.id);
-      });
+  function updateDurationSpanPreview() {
+    const spanEl = document.getElementById('durationTimeSpanPreview');
+    if (!/^\d{2}:\d{2}$/.test(state.input.startTime)) {
+      spanEl.textContent = `${state.input.duration}분`;
+      return;
+    }
+    if (state.input.duration === 0) {
+      spanEl.textContent = '0분 (공강 없음)';
+      return;
+    }
+    const end = addMinutesToTime(state.input.startTime, state.input.duration);
+    const endPrefix = end.dayOffset > 0 ? `+${end.dayOffset}일 ` : '';
+    spanEl.textContent = `${state.input.startTime} ~ ${endPrefix}${end.hhmm} (${state.input.duration}분)`;
+  }
 
-      // Compute Timestamps
-      let currentMinutes = timeStringToMinutes(startTime);
-      const scheduleItems = blocks.map((b, index) => {
-        const startStr = minutesToTimeString(currentMinutes);
-        const startKorean = minutesToKoreanTime(currentMinutes);
-        const endMinutes = currentMinutes + b.minutes;
-        const endStr = minutesToTimeString(endMinutes);
-        const endKorean = minutesToKoreanTime(endMinutes);
-        currentMinutes = endMinutes;
+  /**
+   * Single source of truth for duration slider, thumb position, fill bar, tick labels, quick buttons, and 0-min notice.
+   * Position ratio = (selectedMinutes / 240) * 100
+   */
+  function syncDurationUI(minutes) {
+    const clamped = Math.max(0, Math.min(240, Math.round(minutes / 15) * 15));
+    state.input.duration = clamped;
 
-        let title = b.activity.title;
-        if (memo && index === 1 && !b.activity.id.startsWith("buf_")) {
-          title = `${b.activity.title} (${memo})`;
-        }
+    const ratioPct = (clamped / 240) * 100;
+    const slider = document.getElementById('durationSlider');
+    const fill = document.getElementById('sliderFill');
+    const thumb = document.getElementById('sliderThumb');
+    const display = document.getElementById('durationDisplayText');
+    const zeroNotice = document.getElementById('zeroDurationNotice');
 
-        return {
-          id: `item-${Date.now()}-${index}`,
-          startTime: startStr,
-          endTime: endStr,
-          startKorean: startKorean,
-          endKorean: endKorean,
-          duration: b.minutes,
-          title: title,
-          category: b.activity.category || "일정",
-          icon: b.activity.icon || "📌",
-          reason: b.customReason || b.activity.reason || "알찬 공강 시간 관리를 위해 배치되었습니다.",
-          isCompleted: false
-        };
-      });
+    slider.value = String(clamped);
+    fill.style.width = `${ratioPct}%`;
+    thumb.style.left = `${ratioPct}%`;
+    display.textContent = formatDuration(clamped);
 
-      return scheduleItems;
+    document.querySelectorAll('.dur-btn').forEach(btn => {
+      btn.classList.toggle('is-selected', Number(btn.dataset.minutes) === clamped);
+    });
+
+    document.querySelectorAll('.slider-tick-label').forEach(lbl => {
+      lbl.classList.toggle('is-active', Number(lbl.dataset.minutes) === clamped);
+    });
+
+    zeroNotice.style.display = clamped === 0 ? 'flex' : 'none';
+    updateDurationSpanPreview();
+    updateSubmitSummaryUI();
+  }
+
+  function renderChoiceSelections() {
+    document.querySelectorAll('#locationOptions .choice-card').forEach(card => {
+      card.classList.toggle('is-selected', card.dataset.location === state.input.location);
+    });
+    document.querySelectorAll('#conditionOptions .choice-card').forEach(card => {
+      card.classList.toggle('is-selected', card.dataset.condition === state.input.condition);
+    });
+    const transitBox = document.getElementById('transitSafetyNotice');
+    transitBox.style.display = state.input.location === '이동 중' ? 'flex' : 'none';
+  }
+
+  function renderGoalsAndPriorityUI() {
+    const grid = document.getElementById('goalsGrid');
+    const listEl = document.getElementById('priorityList');
+    const countEl = document.getElementById('selectedGoalCountText');
+
+    countEl.textContent = `${state.input.goals.length}개 선택됨`;
+
+    if (grid.children.length === 0) {
+      grid.innerHTML = GOAL_LIST.map(goal => {
+        const cat = CATEGORIES[goal];
+        return `
+          <button type="button" class="goal-toggle" data-goal="${goal}" aria-pressed="false">
+            <span class="goal-toggle-left">
+              <span class="goal-icon-box" style="background:${cat.bg}; border:1px solid ${cat.border};">${cat.emoji}</span>
+              <span>
+                <div style="font-size:14px; font-weight:700; color:var(--navy-900);">${goal}</div>
+                <div style="font-size:11.5px; color:var(--text-muted);">${cat.desc}</div>
+              </span>
+            </span>
+            <span class="goal-rank-pill"></span>
+          </button>
+        `;
+      }).join('');
     }
 
-    function generateReason(activity, location, condition, goal, memo, isSecondary = false) {
-      const locText = locationLabels[location]?.label;
-      const condText = conditionLabels[condition]?.label;
-      const goalText = goalLabels[goal]?.label;
+    grid.querySelectorAll('.goal-toggle').forEach(btn => {
+      const goal = btn.dataset.goal;
+      const rankIdx = state.input.goals.indexOf(goal);
+      const selected = rankIdx !== -1;
+      btn.classList.toggle('is-selected', selected);
+      btn.setAttribute('aria-pressed', String(selected));
+      const pill = btn.querySelector('.goal-rank-pill');
+      if (pill) pill.textContent = selected ? `${rankIdx + 1}순위` : '';
+    });
 
-      if (memo && !isSecondary) {
-        return `입력해주신 <strong>'${memo}'</strong> 목표를 집중적으로 끝낼 수 있도록, 현재 [${locText}] 환경과 [${condText}] 컨디션에 딱 맞춰 배치했습니다.`;
-      }
-      if (location === "transit") {
-        return `이동 중 안전을 최우선으로 고려하여, 대중교통 안에서도 흔들림 없이 편안하게 실행할 수 있는 맞춤 루틴입니다.`;
-      }
-      if (condition === "tired") {
-        return `현재 몸이 다소 피곤한 상태이므로 뇌에 과도한 스트레스를 주지 않고 부담 없이 성취감을 챙길 수 있도록 강도를 조절했습니다.`;
-      }
-      if (condition === "energetic") {
-        return `에너지가 충만한 날이므로, 높은 집중력이 요구되는 <strong>[${goalText}]</strong> 핵심 분량을 단숨에 격파할 수 있도록 설계했습니다.`;
-      }
-      return `${locText}에서 ${goalText} 목표를 가장 효율적으로 달성할 수 있도록 이동 동선과 피로도를 함께 고려해 추천했습니다.`;
-    }
-
-    /* Helper: Time arithmetic */
-    function timeStringToMinutes(str) {
-      if (!str) return 780; // default 13:00
-      const [h, m] = str.split(":").map(Number);
-      return h * 60 + m;
-    }
-
-    function minutesToTimeString(mins) {
-      let h = Math.floor(mins / 60) % 24;
-      let m = mins % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    }
-
-    function minutesToKoreanTime(mins) {
-      let totalH = Math.floor(mins / 60) % 24;
-      let m = mins % 60;
-      const ampm = totalH < 12 ? "오전" : (totalH === 12 ? "낮" : "오후");
-      const displayH = totalH % 12 === 0 ? 12 : totalH % 12;
-      const displayM = m === 0 ? "00" : String(m).padStart(2, "0");
-      return `${ampm} ${displayH}:${displayM}`;
-    }
-
-    /* ==========================================================================
-       6. WIDE SPEECH POOL FOR ASSISTANT RECOMMENDATIONS
-       ========================================================================== */
-    function generateAssistantSpeech() {
-      const { duration, location, condition, goal, memo } = state;
-      const hours = Math.floor(duration / 60);
-      const mins = duration % 60;
-      let timeText = hours > 0 ? (mins > 0 ? `${hours}시간 ${mins}분` : `${hours}시간`) : `${mins}분`;
-
-      const locName = locationLabels[location]?.label;
-      const condName = conditionLabels[condition]?.label;
-      const goalName = goalLabels[goal]?.label;
-
-      const energeticSpeeches = [
-        `오! 오늘 공강이 <strong>${timeText}</strong>이나 있네요! 😎 ${locName}에 계시고 컨디션도 <strong>[${condName}]</strong>이라 집중력 최고조의 날입니다. ${memo ? `미뤄뒀던 <strong>'${memo}'</strong>부터 시원하게 끝내보는 건 어떨까요? ` : `오늘은 목표하신 <strong>[${goalName}]</strong>을 완벽하게 끝내보는 건 어떨까요? `}중간에 커피 한 잔의 여유도 꼭 챙겨봐요! ☕`,
-        `열정 충전 완료! 🔥 <strong>${timeText}</strong> 동안 ${locName}에서 최고의 성취감을 맛볼 수 있는 시간표를 완성했어요. 이 기세라면 다음 수업도 아주 가뿐하게 들을 수 있겠네요! 🚀`,
-        `반가워요! 활기가 넘치는 공강 <strong>${timeText}</strong>은 대학 생활의 큰 기회죠! ✨ ${memo ? `입력해주신 <strong>'${memo}'</strong> 분량을 단숨에 격파할 수 있도록 ` : `선택하신 <strong>[${goalName}]</strong>에 몰입할 수 있도록 `}황금 루틴을 짜드렸으니 파이팅 넘치게 달려봐요! 🏃‍♂️`
-      ];
-
-      const tiredSpeeches = [
-        `오늘 많이 피곤하셨죠? 🥱 공강 <strong>${timeText}</strong> 동안 무리하지 않고 컨디션을 회복하면서도, <strong>[${goalName}]</strong> 목표를 가볍게 챙길 수 있는 힐링 시간표를 준비했어요. 무리 말고 차근차근 해봐요! ☕`,
-        `수업 듣느라 고생 많으셨어요! 🌿 <strong>${timeText}</strong> 동안 지친 뇌를 달래줄 충전 시간을 넉넉히 배치했습니다. 억지로 달리지 않아도 충분히 알찬 공강을 만들 수 있어요. 파이팅! 푹 쉬어가요 🛋️`,
-        `에너지 게이지가 낮을 땐 스마트한 완급 조절이 답이죠! 🔋 ${locName}에서 부담 없이 소화할 수 있는 편안한 템포로 <strong>${timeText}</strong>을 꽉 채워드렸습니다. 한 걸음씩 가볍게 따라와 보세요! 🌈`
-      ];
-
-      const normalSpeeches = [
-        `안녕하세요! 오늘 <strong>${timeText}</strong>의 공강 시간표가 완성되었습니다. 😊 ${locName}에 계시고 컨디션도 안정적이니, <strong>[${goalName}]</strong>를 깔끔하게 해치우기에 딱 좋은 타이밍이에요! 중간 휴식까지 야무지게 챙겼답니다. 🎯`,
-        `공강 <strong>${timeText}</strong>을 그냥 흘려보내지 않도록 개인 비서가 꼼꼼하게 설계했어요! ⏰ ${memo ? `입력해주신 <strong>'${memo}'</strong>에 집중할 시간도 듬뿍 반영했으니 ` : ''}순서대로 체크하며 뿌듯한 성취감을 느껴보세요! 👏`,
-        `딱 기분 좋은 공강 <strong>${timeText}</strong>이네요! 🍀 생산성과 리프레시의 균형을 맞춘 알짜배기 일정표입니다. 커피 한 잔과 함께 차분하게 시작해 볼까요? ☕`
-      ];
-
-      let pool = normalSpeeches;
-      if (condition === "energetic") pool = energeticSpeeches;
-      if (condition === "tired") pool = tiredSpeeches;
-
-      return pool[Math.floor(Math.random() * pool.length)];
-    }
-
-    /* ==========================================================================
-       7. RENDER FUNCTIONS
-       ========================================================================== */
-    function generateSchedule() {
-      if (!state.startTime) {
-        showValidationAlert("공강 시작 시간을 선택해 주세요.");
-        return;
-      }
-      if (!state.duration || state.duration < 30) {
-        showValidationAlert("공강 지속 시간을 30분 이상 선택해 주세요.");
-        return;
-      }
-
-      state.memo = customMemoInput.value.trim();
-      state.completedItems.clear();
-      state.scheduleItems = generateScheduleData(false);
-
-      renderResultScreen();
-      goToScreen("result");
-    }
-
-    function regenerateSchedule() {
-      state.completedItems.clear();
-      state.scheduleItems = generateScheduleData(true);
-      renderResultScreen();
-      window.scrollTo(0, 0);
-      showToast("새로운 맞춤 일정으로 재추천되었습니다! 🔄");
-    }
-
-    function renderResultScreen() {
-      const speechBox = document.getElementById("assistantSpeech");
-      speechBox.innerHTML = generateAssistantSpeech();
-
-      const summaryContainer = document.getElementById("summaryTags");
-      summaryContainer.innerHTML = "";
-
-      const durationHours = Math.floor(state.duration / 60);
-      const durationMins = state.duration % 60;
-      const durationStr = durationHours > 0 ? (durationMins > 0 ? `${durationHours}시간 ${durationMins}분` : `${durationHours}시간`) : `${durationMins}분`;
-
-      const tags = [
-        { icon: "⏰", text: `시작 ${minutesToKoreanTime(timeStringToMinutes(state.startTime))}` },
-        { icon: "⏳", text: `공강 ${durationStr} (${state.duration}분)`, highlight: true },
-        { icon: locationLabels[state.location].icon, text: locationLabels[state.location].label },
-        { icon: conditionLabels[state.condition].icon, text: conditionLabels[state.condition].label },
-        { icon: goalLabels[state.goal].icon, text: `목표: ${goalLabels[state.goal].label}`, highlight: true }
-      ];
-
-      if (state.memo) {
-        tags.push({ icon: "✏️", text: `메모: ${state.memo}` });
-      }
-
-      tags.forEach(t => {
-        const span = document.createElement("span");
-        span.className = `summary-tag ${t.highlight ? 'highlight' : ''}`;
-        span.innerHTML = `<span>${t.icon}</span> <span>${t.text}</span>`;
-        summaryContainer.appendChild(span);
-      });
-
-      const timelineContainer = document.getElementById("timelineContainer");
-      timelineContainer.innerHTML = "";
-
-      document.getElementById("timelineTotalDuration").textContent = `총 ${durationStr} (${state.duration}분)`;
-
-      state.scheduleItems.forEach((item) => {
-        const isCompleted = state.completedItems.has(item.id);
-
-        const itemEl = document.createElement("div");
-        itemEl.className = `timeline-item ${isCompleted ? 'completed' : ''}`;
-        itemEl.id = `timeline-el-${item.id}`;
-
-        itemEl.innerHTML = `
-          <div class="timeline-node"></div>
-          <div class="timeline-card">
-            <div class="card-top">
-              <div class="time-slot">
-                <span>🕒</span>
-                <span>${item.startKorean} ~ ${item.endKorean}</span>
-              </div>
-              <span class="duration-pill">${item.duration}분</span>
+    if (state.input.goals.length === 0) {
+      listEl.innerHTML = `<div style="font-size:13px; color:var(--danger-main); font-weight:600; padding:6px 2px;">목표를 최소 1개 이상 선택해 주세요.</div>`;
+    } else {
+      listEl.innerHTML = state.input.goals.map((goal, idx) => {
+        const cat = CATEGORIES[goal];
+        const weight = PRIORITY_WEIGHTS[idx] ?? 1;
+        const rankClass = idx === 0 ? 'rank-1' : idx === 1 ? 'rank-2' : idx === 2 ? 'rank-3' : 'rank-other';
+        return `
+          <div class="priority-row" data-goal="${goal}">
+            <div class="priority-left">
+              <span class="rank-badge ${rankClass}">${idx + 1}순위</span>
+              <span>${cat.emoji}</span>
+              <strong style="font-size:14px; color:var(--navy-900);">${goal}</strong>
+              <span class="priority-weight-hint">(가중치 ${weight})</span>
             </div>
-
-            <div class="activity-main">
-              <div class="activity-icon-badge">${item.icon}</div>
-              <div class="activity-details">
-                <div class="activity-title">${item.title}</div>
-                <div class="activity-category">${item.category}</div>
-              </div>
-            </div>
-
-            <div class="reason-box">
-              <strong>추천 이유:</strong> ${item.reason}
-            </div>
-
-            <div class="card-actions">
-              <button type="button" class="btn-check" onclick="toggleItemComplete('${item.id}')">
-                <span class="check-icon">${isCompleted ? '✓ 완료됨' : '○ 완료 체크'}</span>
-              </button>
+            <div class="priority-actions">
+              <button type="button" class="btn btn-secondary btn-xs move-priority-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} aria-label="${goal} 위로 이동">↑ 위로</button>
+              <button type="button" class="btn btn-secondary btn-xs move-priority-down" data-idx="${idx}" ${idx === state.input.goals.length - 1 ? 'disabled' : ''} aria-label="${goal} 아래로 이동">↓ 아래로</button>
             </div>
           </div>
         `;
+      }).join('');
+    }
+    updateSubmitSummaryUI();
+  }
 
-        timelineContainer.appendChild(itemEl);
-      });
+  function updateSubmitSummaryUI() {
+    const el = document.getElementById('submitReadySummary');
+    const dur = formatDuration(state.input.duration);
+    const topGoal = state.input.goals.length > 0 ? `1순위 ${state.input.goals[0]} (총 ${state.input.goals.length}개)` : '목표 미선택';
+    el.textContent = `선택 조건: ${dur} · ${state.input.location} · ${state.input.condition} · ${topGoal}`;
+  }
 
-      updateProgress();
+  function renderSameWeekdayHintOnInput() {
+    const box = document.getElementById('sameWeekdayHintBox');
+    const text = document.getElementById('sameWeekdayHintText');
+    const weekday = getWeekdayKo(state.input.date);
+    if (!weekday) {
+      box.style.display = 'none';
+      return;
+    }
+    const match = state.schedules.find(s => s.dayOfWeek === weekday && s.date !== state.input.date) ||
+      state.schedules.find(s => s.dayOfWeek === weekday);
+    if (match) {
+      box.style.display = 'flex';
+      const prefix = match.date === state.input.date ? '오늘 앞서' : `지난 ${formatKoreanDate(match.date)}에`;
+      text.textContent = `${prefix} 만든 ${weekday}요일 시간표(${formatDuration(match.duration)}, ${match.goals.join('·')})가 있어요!`;
+    } else {
+      box.style.display = 'none';
+    }
+  }
+
+  function validateInputs() {
+    const errorBox = document.getElementById('inputErrorBox');
+    const errorText = document.getElementById('inputErrorText');
+    const showErr = (msg, focusId) => {
+      errorText.textContent = msg;
+      errorBox.style.display = 'flex';
+      if (focusId) {
+        const target = document.getElementById(focusId);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return false;
+    };
+
+    if (!state.input.date || !parseLocalDate(state.input.date)) {
+      return showErr('올바른 공강 날짜를 선택해 주세요.', 'gapDateInput');
+    }
+    if (!/^\d{2}:\d{2}$/.test(state.input.startTime)) {
+      return showErr('공강 시작 시간을 정확히 선택해 주세요.', 'gapStartTimeInput');
+    }
+    if (state.input.duration === 0) {
+      return showErr('공강시간이 없습니다. 15분 이상 선택해 주세요.', 'durationSliderArea');
+    }
+    if (state.input.goals.length === 0) {
+      return showErr('오늘의 목표를 최소 1개 이상 선택해 주세요.', 'goalsGrid');
     }
 
-    /* ==========================================================================
-       8. COMPLETION & PROGRESS TRACKER
-       ========================================================================== */
-    function toggleItemComplete(itemId) {
-      if (state.completedItems.has(itemId)) {
-        state.completedItems.delete(itemId);
-      } else {
-        state.completedItems.add(itemId);
+    errorBox.style.display = 'none';
+    return true;
+  }
+
+  /* ==================== RENDER: RESULT VIEW ==================== */
+  function renderResultView() {
+    const sched = getActiveSchedule();
+    const emptyEl = document.getElementById('resultEmptyState');
+    const contentEl = document.getElementById('resultContent');
+
+    if (!sched) {
+      emptyEl.style.display = 'block';
+      contentEl.style.display = 'none';
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+    contentEl.style.display = 'block';
+
+    // Greeting
+    document.getElementById('greetingText').textContent = sched.greeting;
+
+    // Summary Chips
+    const endInfo = addMinutesToTime(sched.startTime, sched.duration);
+    const endStr = endInfo.dayOffset > 0 ? `+${endInfo.dayOffset}일 ${endInfo.hhmm}` : endInfo.hhmm;
+    const chips = [
+      `📅 ${formatKoreanDate(sched.date)}`,
+      `⏰ ${formatKoreanTime(sched.startTime)} ~ ${endStr} (${formatDuration(sched.duration)})`,
+      `📍 ${sched.location}`,
+      `🔋 ${sched.condition}`,
+      `🎯 ${sched.goals.map((g, i) => `${i + 1}순위 ${g}`).join(' > ')}`
+    ];
+    if (sched.memo) {
+      chips.push(`📝 ${sched.memo}`);
+    }
+    document.getElementById('summaryChips').innerHTML = chips
+      .map(c => `<span class="meta-chip">${escapeHtml(c)}</span>`)
+      .join('');
+
+    // Omitted goals notice
+    const omittedBox = document.getElementById('omittedGoalsNotice');
+    const omittedText = document.getElementById('omittedGoalsText');
+    if (sched.omittedGoals && sched.omittedGoals.length > 0) {
+      omittedBox.style.display = 'flex';
+      omittedText.textContent = sched.omittedGoals.map(o => o.reason).join(' ');
+    } else {
+      omittedBox.style.display = 'none';
+    }
+
+    // Progress
+    sched.progress = computeProgress(sched.activities);
+    document.getElementById('progressStatsText').textContent =
+      `전체 진행률 · ${sched.progress.completedCount} / ${sched.progress.totalCount} 완료`;
+    document.getElementById('progressPercentText').textContent = `${sched.progress.percent}%`;
+    document.getElementById('progressFillBar').style.width = `${sched.progress.percent}%`;
+
+    // Reason & Chart
+    document.getElementById('reasonSummaryText').textContent = sched.reasonSummary;
+    renderAllocationCharts(sched);
+
+    // Timeline Cards
+    renderTimelineCards(sched);
+
+    // Timer Bar
+    syncTimerUIFromState();
+  }
+
+  function computeCategoryTotals(sched) {
+    const totals = {};
+    let assignedMinutes = 0;
+    sched.activities.forEach(act => {
+      assignedMinutes += act.duration;
+      totals[act.type] = (totals[act.type] || 0) + act.duration;
+    });
+    const freeMinutes = Math.max(0, sched.duration - assignedMinutes);
+    return { totals, assignedMinutes, freeMinutes };
+  }
+
+  function renderAllocationCharts(sched) {
+    const { totals, freeMinutes } = computeCategoryTotals(sched);
+    const total = sched.duration || 1;
+
+    const segments = [];
+    Object.keys(CATEGORIES).forEach(catName => {
+      const mins = totals[catName] || 0;
+      if (mins > 0) {
+        segments.push({
+          name: catName,
+          minutes: mins,
+          pct: Math.round((mins / total) * 1000) / 10,
+          color: CATEGORIES[catName].color
+        });
+      }
+    });
+    if (freeMinutes > 0) {
+      segments.push({
+        name: '남은 여유 시간',
+        minutes: freeMinutes,
+        pct: Math.round((freeMinutes / total) * 1000) / 10,
+        color: '#94A3B8'
+      });
+    }
+
+    // 1. SVG Donut Chart
+    const svg = document.getElementById('allocDonutSvg');
+    const radius = 64;
+    const circumference = 2 * Math.PI * radius;
+    let offset = 0;
+
+    let circlesHtml = `<circle cx="90" cy="90" r="${radius}" fill="none" stroke="#E2E8F0" stroke-width="24"></circle>`;
+    segments.forEach(seg => {
+      const len = (seg.minutes / total) * circumference;
+      circlesHtml += `<circle cx="90" cy="90" r="${radius}" fill="none" stroke="${seg.color}" stroke-width="24" stroke-dasharray="${len.toFixed(2)} ${circumference.toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 90 90)"></circle>`;
+      offset += len;
+    });
+    svg.innerHTML = circlesHtml;
+    document.getElementById('donutCenterTotal').textContent = formatDuration(sched.duration);
+
+    // 2. Stacked Horizontal Bar
+    const stackedEl = document.getElementById('allocStackedBar');
+    stackedEl.innerHTML = segments.map(seg => {
+      const widthPct = (seg.minutes / total) * 100;
+      return `<div class="stacked-seg" style="width: ${widthPct}%; background: ${seg.color};" title="${escapeHtml(seg.name)} ${formatDuration(seg.minutes)} (${seg.pct}%)"></div>`;
+    }).join('');
+
+    // 3. Legend Items
+    const legendEl = document.getElementById('allocLegend');
+    legendEl.innerHTML = segments.map(seg => `
+      <div class="alloc-item">
+        <div class="alloc-left">
+          <span class="color-dot" style="background: ${seg.color};"></span>
+          <span class="alloc-name">${escapeHtml(seg.name)}</span>
+        </div>
+        <span class="alloc-val">${formatDuration(seg.minutes)} (${seg.pct}%)</span>
+      </div>
+    `).join('');
+  }
+
+  function renderTimelineCards(sched) {
+    const listEl = document.getElementById('timelineList');
+    const { assignedMinutes, freeMinutes } = computeCategoryTotals(sched);
+    const descEl = document.getElementById('scheduleMetaDesc');
+    descEl.textContent = `총 공강 ${formatDuration(sched.duration)} 중 ${formatDuration(assignedMinutes)} 배정${freeMinutes > 0 ? ` · 남은 여유 시간 ${formatDuration(freeMinutes)}` : ' (100% 맞춤 구성)'}`;
+
+    if (sched.activities.length === 0) {
+      listEl.innerHTML = `
+        <div class="free-buffer-card">
+          <div class="free-buffer-info">
+            <strong>현재 배정된 활동이 없습니다.</strong> 전체 ${formatDuration(sched.duration)}의 여유 시간이 남아 있어요.
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="addFirstActivityBtn">+ 활동 추가하기</button>
+        </div>
+      `;
+      const firstBtn = document.getElementById('addFirstActivityBtn');
+      if (firstBtn) firstBtn.addEventListener('click', () => openActivityModal('add'));
+      return;
+    }
+
+    let html = sched.activities.map((act, idx) => {
+      const cat = CATEGORIES[act.type] || CATEGORIES['개인 용무'];
+      const isTimerTarget = state.timer.scheduleId === sched.id && state.timer.activityId === act.id;
+      const timerStatus = isTimerTarget ? state.timer.status : 'idle';
+      const isRunning = timerStatus === 'running';
+      const isPaused = timerStatus === 'paused';
+
+      let statusBadge = `<span class="act-state-tag state-upcoming">예정</span>`;
+      if (act.completed) {
+        statusBadge = `<span class="act-state-tag state-done">완료됨</span>`;
+      } else if (isRunning) {
+        statusBadge = `<span class="act-state-tag state-running">진행 중</span>`;
+      } else if (isPaused) {
+        statusBadge = `<span class="act-state-tag state-paused">일시정지</span>`;
       }
 
-      const itemEl = document.getElementById(`timeline-el-${itemId}`);
-      const isCompleted = state.completedItems.has(itemId);
-      if (itemEl) {
-        itemEl.classList.toggle("completed", isCompleted);
-        const checkBtn = itemEl.querySelector(".btn-check");
-        if (checkBtn) {
-          checkBtn.innerHTML = `<span>${isCompleted ? '✓ 완료됨' : '○ 완료 체크'}</span>`;
+      const dayText = act.endDayOffset > 0
+        ? `<span class="act-day-tag">${act.startDayOffset > 0 ? `+${act.startDayOffset}일~+${act.endDayOffset}일` : `+${act.endDayOffset}일 종료`}</span>`
+        : '';
+
+      let timerControlsHtml = '';
+      if (isRunning) {
+        const rem = computeLiveRemainingSeconds();
+        timerControlsHtml = `
+          <span class="timer-readout" data-timer-clock="${act.id}">${formatSecondsMMSS(rem)}</span>
+          <button type="button" class="btn btn-mint btn-xs act-timer-pause" data-id="${act.id}">일시정지</button>
+          <button type="button" class="btn btn-secondary btn-xs act-timer-reset" data-id="${act.id}">초기화</button>
+        `;
+      } else if (isPaused) {
+        timerControlsHtml = `
+          <span class="timer-readout" data-timer-clock="${act.id}">${formatSecondsMMSS(state.timer.remainingSeconds)}</span>
+          <button type="button" class="btn btn-accent btn-xs act-timer-resume" data-id="${act.id}">재개</button>
+          <button type="button" class="btn btn-secondary btn-xs act-timer-reset" data-id="${act.id}">초기화</button>
+        `;
+      } else {
+        timerControlsHtml = `
+          <button type="button" class="btn btn-soft btn-xs act-timer-start" data-id="${act.id}">⏱️ 타이머 시작 (${act.duration}분)</button>
+        `;
+      }
+
+      return `
+        <article class="activity-card cat-${cat.key} ${act.completed ? 'is-completed' : ''} ${isRunning ? 'is-running' : ''} ${isPaused ? 'is-paused' : ''}" data-act-id="${act.id}">
+          <div class="act-time-col">
+            <div>
+              <div class="act-time-range">${act.startTime} ~ ${act.endTime}</div>
+              ${dayText}
+            </div>
+            <div class="act-dur-pill">${formatDuration(act.duration)}</div>
+            ${statusBadge}
+          </div>
+
+          <div class="act-body-col">
+            <div class="act-top-row">
+              <div class="act-title-wrap">
+                <div class="act-badges">
+                  <span class="cat-pill badge-${cat.key}">${cat.emoji} ${escapeHtml(act.type)}</span>
+                  ${act.priorityRank ? `<span class="cat-pill" style="background:#F8FAFC; color:#334155; border-color:#E2E8F0;">${act.priorityRank}순위 목표</span>` : ''}
+                </div>
+                <h4 class="act-title">${escapeHtml(act.title)}</h4>
+              </div>
+
+              <button type="button" class="check-btn ${act.completed ? 'is-checked' : ''} act-toggle-done" data-id="${act.id}" aria-pressed="${act.completed}">
+                <span>${act.completed ? '✓ 완료' : '○ 완료 체크'}</span>
+              </button>
+            </div>
+
+            <p class="act-reason">${escapeHtml(act.reason || '')}</p>
+
+            <div class="act-controls-row">
+              <div class="timer-inline-group">
+                ${timerControlsHtml}
+              </div>
+              <div class="edit-inline-group">
+                <button type="button" class="btn btn-secondary btn-xs act-move-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''} aria-label="위로 순서 이동">↑</button>
+                <button type="button" class="btn btn-secondary btn-xs act-move-down" data-idx="${idx}" ${idx === sched.activities.length - 1 ? 'disabled' : ''} aria-label="아래로 순서 이동">↓</button>
+                <button type="button" class="btn btn-secondary btn-xs act-edit-btn" data-id="${act.id}">수정</button>
+                <button type="button" class="btn btn-danger-soft btn-xs act-delete-btn" data-id="${act.id}">삭제</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      `;
+    }).join('');
+
+    if (freeMinutes > 0) {
+      const freeStart = addMinutesToTime(sched.startTime, assignedMinutes);
+      const freeEnd = addMinutesToTime(sched.startTime, sched.duration);
+      html += `
+        <div class="free-buffer-card">
+          <div class="free-buffer-info">
+            <strong>남은 여유 시간 ${formatDuration(freeMinutes)}</strong> (${freeStart.hhmm} ~ ${freeEnd.hhmm})<br>
+            새 활동을 추가하거나 기존 활동의 소요시간을 늘려 채울 수 있어요.
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-soft btn-xs" id="fillFreeAddBtn">+ 활동 추가</button>
+            <button type="button" class="btn btn-mint btn-xs" id="distributeFreeBtn">기존 활동에 자동 배분</button>
+          </div>
+        </div>
+      `;
+    }
+
+    listEl.innerHTML = html;
+
+    const fillAddBtn = document.getElementById('fillFreeAddBtn');
+    if (fillAddBtn) fillAddBtn.addEventListener('click', () => openActivityModal('add'));
+    const distBtn = document.getElementById('distributeFreeBtn');
+    if (distBtn) distBtn.addEventListener('click', distributeFreeMinutesToSchedule);
+  }
+
+  /* ==================== SCHEDULE EDITING & TIME RECALCULATION ==================== */
+  function finalizeScheduleMutation(sched, statusLabel) {
+    sched.activities = computeTimelineTimes(sched.startTime, sched.activities);
+    sched.progress = computeProgress(sched.activities);
+    sched.lastModified = formatLocalTimestampNow();
+    sched.lastModifiedMs = Date.now();
+    persistSchedules(statusLabel);
+    renderResultView();
+  }
+
+  function distributeFreeMinutesToSchedule() {
+    const sched = getActiveSchedule();
+    if (!sched || sched.activities.length === 0) return;
+    const { freeMinutes } = computeCategoryTotals(sched);
+    if (freeMinutes <= 0) return;
+    // Add freeMinutes to highest-priority (or first non-prep) activity
+    let targetIdx = sched.activities.findIndex(a => a.type !== '이동 및 준비');
+    if (targetIdx === -1) targetIdx = 0;
+    sched.activities[targetIdx].duration += freeMinutes;
+    finalizeScheduleMutation(sched, '여유 시간 자동 배분 저장');
+    showToast(`여유 시간 ${formatDuration(freeMinutes)}을 '${sched.activities[targetIdx].title}'에 배분했어요.`);
+  }
+
+  function moveActivityOrder(idx, direction) {
+    const sched = getActiveSchedule();
+    if (!sched) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= sched.activities.length) return;
+    const arr = sched.activities;
+    const temp = arr[idx];
+    arr[idx] = arr[targetIdx];
+    arr[targetIdx] = temp;
+    finalizeScheduleMutation(sched, '순서 변경 저장');
+    showToast('활동 순서와 시간을 다시 계산했어요.');
+  }
+
+  function toggleActivityDone(actId) {
+    const sched = getActiveSchedule();
+    if (!sched) return;
+    const act = sched.activities.find(a => a.id === actId);
+    if (!act) return;
+    act.completed = !act.completed;
+    finalizeScheduleMutation(sched, '완료 상태 저장');
+  }
+
+  /**
+   * Computes how to trim other activities if `shortage > 0` without exceeding `sched.duration`.
+   * Returns { possible: boolean, adjustedActivities: Array, summaryLines: Array, maxAvailableFromOthers: number }
+   */
+  function computeAutoTrimPlan(sched, excludeId, shortageMinutes) {
+    const cloned = sched.activities.map(a => ({ ...a }));
+    let needed = shortageMinutes;
+    const summaryLines = [];
+
+    // Priority order for trimming:
+    // 1) '이동 및 준비' / auto buffers (can trim down to 0 and remove)
+    // 2) later non-primary activities (trim down to min 15m)
+    // 3) earlier activities except excludeId (trim down to min 15m)
+    const candidates = cloned
+      .map((a, idx) => ({ a, idx }))
+      .filter(item => item.a.id !== excludeId)
+      .sort((x, y) => {
+        const xAuto = x.a.type === '이동 및 준비' || x.a.isAutoBuffer ? 0 : 1;
+        const yAuto = y.a.type === '이동 및 준비' || y.a.isAutoBuffer ? 0 : 1;
+        if (xAuto !== yAuto) return xAuto - yAuto;
+        return y.idx - x.idx; // prefer later activities first
+      });
+
+    for (const item of candidates) {
+      if (needed <= 0) break;
+      const minKeep = (item.a.type === '이동 및 준비' || item.a.isAutoBuffer) ? 0 : 15;
+      const reducible = Math.max(0, item.a.duration - minKeep);
+      if (reducible <= 0) continue;
+      const take = Math.min(needed, reducible);
+      item.a.duration -= take;
+      needed -= take;
+      summaryLines.push(
+        item.a.duration === 0
+          ? `'${item.a.title}' 삭제 (-${formatDuration(take)})`
+          : `'${item.a.title}' ${formatDuration(item.a.duration + take)} → ${formatDuration(item.a.duration)} (-${formatDuration(take)})`
+      );
+    }
+
+    const filtered = cloned.filter(a => a.duration > 0);
+    return {
+      possible: needed === 0,
+      adjustedActivities: filtered,
+      summaryLines
+    };
+  }
+
+  function openActivityModal(mode, activityId) {
+    const sched = getActiveSchedule();
+    if (!sched) return;
+
+    modalContext = { mode, activityId: activityId || null, pendingAdjustedPlan: null };
+    const modal = document.getElementById('activityModal');
+    const titleEl = document.getElementById('activityModalTitle');
+    const actTitleInput = document.getElementById('modalActTitle');
+    const actTypeSelect = document.getElementById('modalActType');
+    const actDurSelect = document.getElementById('modalActDuration');
+    const insertWrap = document.getElementById('modalInsertPosWrap');
+    const adjustBtn = document.getElementById('activityModalAdjustSaveBtn');
+
+    // Build 15-min duration options up to sched.duration
+    const options = [];
+    for (let m = 15; m <= Math.max(15, sched.duration); m += 15) {
+      options.push(`<option value="${m}">${formatDuration(m)} (${m}분)</option>`);
+    }
+    // Also add one over-budget option just so user can test/see explicit block if sched.duration < 240
+    if (sched.duration < 240) {
+      const over = sched.duration + 15;
+      options.push(`<option value="${over}">${formatDuration(over)} (${over}분 · 공강 초과 테스트)</option>`);
+    }
+    actDurSelect.innerHTML = options.join('');
+
+    if (mode === 'edit') {
+      const act = sched.activities.find(a => a.id === activityId);
+      if (!act) return;
+      titleEl.textContent = '활동 수정';
+      actTitleInput.value = act.title;
+      actTypeSelect.value = act.type;
+      actDurSelect.value = String(act.duration);
+      insertWrap.style.display = 'none';
+    } else {
+      titleEl.textContent = '새 활동 추가';
+      actTitleInput.value = '';
+      actTypeSelect.value = '공부';
+      const { freeMinutes } = computeCategoryTotals(sched);
+      actDurSelect.value = String(freeMinutes >= 15 ? Math.min(30, freeMinutes) : 15);
+      insertWrap.style.display = 'flex';
+    }
+
+    adjustBtn.style.display = 'none';
+    evaluateModalBudget();
+    modal.classList.add('is-open');
+    setTimeout(() => actTitleInput.focus(), 50);
+  }
+
+  function evaluateModalBudget() {
+    const sched = getActiveSchedule();
+    if (!sched || !modalContext) return;
+
+    const durSelect = document.getElementById('modalActDuration');
+    const newDur = Number(durSelect.value);
+    const budgetInfo = document.getElementById('modalBudgetInfo');
+    const conflictBox = document.getElementById('modalConflictBox');
+    const saveBtn = document.getElementById('activityModalSaveBtn');
+    const adjustBtn = document.getElementById('activityModalAdjustSaveBtn');
+
+    const { assignedMinutes, freeMinutes } = computeCategoryTotals(sched);
+    let delta = newDur;
+    if (modalContext.mode === 'edit') {
+      const act = sched.activities.find(a => a.id === modalContext.activityId);
+      delta = newDur - (act ? act.duration : 0);
+    }
+
+    budgetInfo.textContent = `전체 공강시간: ${formatDuration(sched.duration)} · 현재 배정: ${formatDuration(assignedMinutes)} · 남은 여유 시간: ${formatDuration(freeMinutes)}`;
+
+    modalContext.pendingAdjustedPlan = null;
+
+    if (newDur > sched.duration) {
+      conflictBox.style.display = 'flex';
+      conflictBox.className = 'notice-box notice-danger';
+      conflictBox.textContent = `전체 공강시간(${formatDuration(sched.duration)})을 초과하는 시간은 저장할 수 없습니다.`;
+      saveBtn.disabled = true;
+      adjustBtn.style.display = 'none';
+      return;
+    }
+
+    if (delta <= freeMinutes) {
+      conflictBox.style.display = 'none';
+      saveBtn.disabled = false;
+      adjustBtn.style.display = 'none';
+      return;
+    }
+
+    // Needs more time than freeMinutes
+    const shortage = delta - freeMinutes;
+    const plan = computeAutoTrimPlan(sched, modalContext.activityId, shortage);
+    if (plan.possible) {
+      modalContext.pendingAdjustedPlan = plan;
+      conflictBox.style.display = 'flex';
+      conflictBox.className = 'notice-box notice-warn';
+      conflictBox.innerHTML = `<div><strong>여유 시간(${formatDuration(freeMinutes)})이 ${formatDuration(shortage)} 부족합니다.</strong><br>공강시간을 초과하지 않도록 아래 활동을 자동 조정하여 맞출 수 있어요:<br>• ${plan.summaryLines.map(escapeHtml).join('<br>• ')}</div>`;
+      saveBtn.disabled = true;
+      adjustBtn.style.display = 'inline-flex';
+    } else {
+      conflictBox.style.display = 'flex';
+      conflictBox.className = 'notice-box notice-danger';
+      conflictBox.textContent = `여유 시간이 부족하고 다른 활동도 더 줄일 수 없어 ${formatDuration(newDur)}로 변경할 수 없습니다. 다른 활동을 먼저 줄이거나 삭제해 주세요.`;
+      saveBtn.disabled = true;
+      adjustBtn.style.display = 'none';
+    }
+  }
+
+  function saveActivityModal(useAutoAdjust) {
+    const sched = getActiveSchedule();
+    if (!sched || !modalContext) return;
+
+    const title = document.getElementById('modalActTitle').value.trim();
+    const type = document.getElementById('modalActType').value;
+    const duration = Number(document.getElementById('modalActDuration').value);
+
+    if (!title) {
+      showToast('활동 내용을 입력해 주세요.', 'warn');
+      return;
+    }
+    if (duration > sched.duration || duration < 15 || duration % 15 !== 0) {
+      showToast('전체 공강시간을 초과하거나 올바르지 않은 시간입니다.', 'error');
+      return;
+    }
+
+    const { freeMinutes } = computeCategoryTotals(sched);
+    let delta = duration;
+    if (modalContext.mode === 'edit') {
+      const act = sched.activities.find(a => a.id === modalContext.activityId);
+      if (!act) return;
+      delta = duration - act.duration;
+    }
+
+    if (delta > freeMinutes) {
+      if (!useAutoAdjust || !modalContext.pendingAdjustedPlan || !modalContext.pendingAdjustedPlan.possible) {
+        showToast('여유 시간이 부족해 저장할 수 없습니다.', 'error');
+        return;
+      }
+      sched.activities = modalContext.pendingAdjustedPlan.adjustedActivities;
+    }
+
+    if (modalContext.mode === 'edit') {
+      const act = sched.activities.find(a => a.id === modalContext.activityId);
+      if (!act) return;
+      act.title = title;
+      act.type = type;
+      act.duration = duration;
+      // If this activity's timer is currently active and duration changed, reset idle or notify
+      if (state.timer.scheduleId === sched.id && state.timer.activityId === act.id && state.timer.status !== 'idle') {
+        resetActiveTimer(true);
+        showToast('수정된 시간에 맞춰 실행 중이던 타이머를 초기화했습니다.', 'warn');
+      }
+      finalizeScheduleMutation(sched, '활동 수정 저장');
+      showToast('활동 내용을 수정하고 이후 일정을 자동 재계산했어요.');
+    } else {
+      const insertPos = document.getElementById('modalInsertPos').value;
+      const newAct = {
+        id: generateUniqueId('act'),
+        goalTag: type,
+        type,
+        duration,
+        title,
+        reason: '사용자가 직접 추가한 맞춤 활동입니다.',
+        completed: false
+      };
+      if (insertPos === 'start') {
+        sched.activities.unshift(newAct);
+      } else {
+        sched.activities.push(newAct);
+      }
+      finalizeScheduleMutation(sched, '활동 추가 저장');
+      showToast('새 활동을 추가하고 시간을 자동 계산했어요.');
+    }
+
+    closeModal('activityModal');
+  }
+
+  function requestDeleteActivity(actId) {
+    const sched = getActiveSchedule();
+    if (!sched) return;
+    const act = sched.activities.find(a => a.id === actId);
+    if (!act) return;
+
+    const hasOthers = sched.activities.length > 1;
+    const footBtns = [
+      {
+        label: '취소',
+        cls: 'btn btn-secondary btn-sm',
+        onClick: () => closeModal('confirmModal')
+      },
+      {
+        label: '삭제 (여유 시간으로 남기기)',
+        cls: 'btn btn-danger-soft btn-sm',
+        onClick: () => {
+          performDeleteActivity(actId, false);
+          closeModal('confirmModal');
         }
       }
+    ];
 
-      updateProgress();
-    }
-
-    function updateProgress() {
-      const total = state.scheduleItems.length;
-      const completed = state.completedItems.size;
-      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-      const percentEl = document.getElementById("progressPercent");
-      const fillEl = document.getElementById("progressBarFill");
-      const textEl = document.getElementById("progressStatusText");
-      const congratsEl = document.getElementById("congratsBanner");
-
-      percentEl.textContent = `${percent}%`;
-      fillEl.style.width = `${percent}%`;
-
-      if (percent === 100) {
-        textEl.textContent = `축하합니다! 모든 일정을 완벽하게 수행했습니다! (${completed}/${total}개 완료)`;
-        congratsEl.style.display = "block";
-        triggerConfetti();
-      } else if (percent > 0) {
-        textEl.textContent = `공강을 알차게 보내는 중이에요! (${completed}/${total}개 완료)`;
-        congratsEl.style.display = "none";
-      } else {
-        textEl.textContent = `완료한 일정을 체크해 보세요! (0/${total}개 완료)`;
-        congratsEl.style.display = "none";
-      }
-    }
-
-    /* ==========================================================================
-       9. COPY SCHEDULE TO CLIPBOARD
-       ========================================================================== */
-    function copyScheduleToClipboard() {
-      const durationHours = Math.floor(state.duration / 60);
-      const durationMins = state.duration % 60;
-      const durationStr = durationHours > 0 ? (durationMins > 0 ? `${durationHours}시간 ${durationMins}분` : `${durationHours}시간`) : `${durationMins}분`;
-
-      let text = `[GAP TIME - 나의 공강 시간표]\n`;
-      text += `📍 위치: ${locationLabels[state.location].label} | 🔋 컨디션: ${conditionLabels[state.condition].label} | 🎯 목표: ${goalLabels[state.goal].label}\n`;
-      text += `⏳ 총 공강: ${durationStr} (${state.duration}분)\n`;
-      if (state.memo) text += `✏️ 메모: ${state.memo}\n`;
-      text += `------------------------------------\n`;
-
-      state.scheduleItems.forEach((item) => {
-        const check = state.completedItems.has(item.id) ? "✅" : "⬜";
-        text += `${check} ${item.startKorean} ~ ${item.endKorean} (${item.duration}분)\n`;
-        text += `   ${item.icon} ${item.title}\n`;
+    if (hasOthers) {
+      footBtns.push({
+        label: '삭제 후 남은 활동에 자동 배분',
+        cls: 'btn btn-primary btn-sm',
+        onClick: () => {
+          performDeleteActivity(actId, true);
+          closeModal('confirmModal');
+        }
       });
-      text += `------------------------------------\n공강시간 활용 플래너 GAP TIME에서 생성됨 ⏰`;
+    }
 
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-          showToast("시간표가 클립보드에 복사되었습니다! 📋");
-        }).catch(() => {
-          fallbackCopyText(text);
-        });
-      } else {
-        fallbackCopyText(text);
+    openConfirmModal(
+      '활동 삭제 확인',
+      `'${act.title}' (${formatDuration(act.duration)}) 일정을 삭제할까요? 삭제 후 나머지 활동의 시작·종료 시간이 자동으로 재계산됩니다.`,
+      footBtns
+    );
+  }
+
+  function performDeleteActivity(actId, autoRedistribute) {
+    const sched = getActiveSchedule();
+    if (!sched) return;
+    const idx = sched.activities.findIndex(a => a.id === actId);
+    if (idx === -1) return;
+    const removed = sched.activities.splice(idx, 1)[0];
+
+    if (state.timer.scheduleId === sched.id && state.timer.activityId === actId) {
+      resetActiveTimer(true);
+    }
+
+    if (autoRedistribute && sched.activities.length > 0) {
+      let targetIdx = sched.activities.findIndex(a => a.type !== '이동 및 준비');
+      if (targetIdx === -1) targetIdx = 0;
+      sched.activities[targetIdx].duration += removed.duration;
+    }
+
+    finalizeScheduleMutation(sched, '활동 삭제 저장');
+    showToast(autoRedistribute ? '삭제 후 남은 활동에 시간을 합쳐 재구성했어요.' : '활동을 삭제하고 시간표를 재구성했어요.');
+  }
+
+  /* ==================== REAL-TIME TIMER ENGINE ==================== */
+  function unlockAudio() {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      if (!audioCtx) {
+        audioCtx = new AudioContextClass();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+    } catch (e) {
+      // Ignore environments without Web Audio
+    }
+  }
+
+  function playCompletionChime() {
+    try {
+      unlockAudio();
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+      notes.forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.16);
+        gain.gain.setValueAtTime(0.001, now + i * 0.16);
+        gain.gain.exponentialRampToValueAtTime(0.22, now + i * 0.16 + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.16 + 0.42);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now + i * 0.16);
+        osc.stop(now + i * 0.16 + 0.45);
+      });
+    } catch (e) {
+      // Safe fallback if audio blocked
+    }
+  }
+
+  function computeLiveRemainingSeconds() {
+    if (state.timer.status === 'running' && state.timer.endTimestamp) {
+      return Math.max(0, Math.ceil((state.timer.endTimestamp - Date.now()) / 1000));
+    }
+    return Math.max(0, state.timer.remainingSeconds || 0);
+  }
+
+  function startActivityTimer(actId) {
+    const sched = getActiveSchedule();
+    if (!sched) return;
+    const act = sched.activities.find(a => a.id === actId);
+    if (!act) return;
+
+    unlockAudio();
+
+    // Clear handling if another timer is running or paused
+    if (state.timer.status === 'running' || state.timer.status === 'paused') {
+      if (state.timer.activityId !== actId) {
+        const prevSched = state.schedules.find(s => s.id === state.timer.scheduleId);
+        const prevAct = prevSched ? prevSched.activities.find(a => a.id === state.timer.activityId) : null;
+        if (prevAct) {
+          showToast(`기존 '${prevAct.title}' 타이머를 종료하고 '${act.title}' 타이머를 시작했어요.`, 'warn');
+        }
       }
     }
 
-    function fallbackCopyText(text) {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand("copy");
-        showToast("시간표가 클립보드에 복사되었습니다! 📋");
-      } catch (err) {
-        showToast("복사 실패. 브라우저 설정을 확인해 주세요.");
-      }
-      document.body.removeChild(textarea);
+    const totalSec = act.duration * 60;
+    state.timer = {
+      scheduleId: sched.id,
+      activityId: act.id,
+      status: 'running',
+      durationSeconds: totalSec,
+      remainingSeconds: totalSec,
+      endTimestamp: Date.now() + totalSec * 1000
+    };
+    persistTimer();
+    ensureTimerTicker();
+    renderResultView();
+  }
+
+  function pauseActiveTimer() {
+    if (state.timer.status !== 'running') return;
+    const rem = computeLiveRemainingSeconds();
+    state.timer.status = 'paused';
+    state.timer.remainingSeconds = rem;
+    state.timer.endTimestamp = null;
+    persistTimer();
+    stopTimerTicker();
+    renderResultView();
+  }
+
+  function resumeActiveTimer() {
+    if (state.timer.status !== 'paused') return;
+    unlockAudio();
+    const rem = Math.max(1, state.timer.remainingSeconds);
+    state.timer.status = 'running';
+    state.timer.endTimestamp = Date.now() + rem * 1000;
+    persistTimer();
+    ensureTimerTicker();
+    renderResultView();
+  }
+
+  function resetActiveTimer(silent) {
+    stopTimerTicker();
+    state.timer = {
+      scheduleId: null,
+      activityId: null,
+      status: 'idle',
+      durationSeconds: 0,
+      remainingSeconds: 0,
+      endTimestamp: null
+    };
+    persistTimer();
+    if (!silent) {
+      renderResultView();
+      showToast('타이머를 원래 설정 시간으로 초기화했어요.');
+    }
+  }
+
+  function ensureTimerTicker() {
+    stopTimerTicker();
+    if (state.timer.status === 'running') {
+      timerIntervalHandle = setInterval(tickTimer, 250);
+      tickTimer();
+    }
+  }
+
+  function stopTimerTicker() {
+    if (timerIntervalHandle) {
+      clearInterval(timerIntervalHandle);
+      timerIntervalHandle = null;
+    }
+  }
+
+  function tickTimer() {
+    if (state.timer.status !== 'running') return;
+    const rem = computeLiveRemainingSeconds();
+    state.timer.remainingSeconds = rem;
+
+    if (rem <= 0) {
+      handleTimerFinished();
+      return;
+    }
+    syncTimerClocksOnly(rem);
+  }
+
+  function syncTimerClocksOnly(remSeconds) {
+    const formatted = formatSecondsMMSS(remSeconds);
+    const barClock = document.getElementById('timerBarClock');
+    if (barClock) barClock.textContent = formatted;
+    if (state.timer.activityId) {
+      const cardClock = document.querySelector(`[data-timer-clock="${state.timer.activityId}"]`);
+      if (cardClock) cardClock.textContent = formatted;
+    }
+  }
+
+  function syncTimerUIFromState() {
+    const bar = document.getElementById('activeTimerBar');
+    const activeSched = getActiveSchedule();
+    const isActiveInCurrent = activeSched && state.timer.scheduleId === activeSched.id;
+
+    if (!isActiveInCurrent || state.timer.status === 'idle' || state.timer.status === 'ended') {
+      bar.classList.remove('is-visible');
+      return;
     }
 
-    function showToast(msg) {
-      const toast = document.getElementById("toastPopup");
-      const toastText = document.getElementById("toastText");
-      toastText.textContent = msg;
-      toast.classList.add("show");
-      setTimeout(() => {
-        toast.classList.remove("show");
-      }, 2500);
+    const act = activeSched.activities.find(a => a.id === state.timer.activityId);
+    if (!act) {
+      bar.classList.remove('is-visible');
+      return;
     }
 
-    /* ==========================================================================
-       10. CONFETTI CELEBRATION EFFECT
-       ========================================================================== */
-    function triggerConfetti() {
-      const canvas = document.getElementById("confetti-canvas");
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+    const rem = computeLiveRemainingSeconds();
+    bar.classList.add('is-visible');
+    document.getElementById('timerBarTitle').textContent = act.title;
+    document.getElementById('timerBarClock').textContent = formatSecondsMMSS(rem);
+    const dot = document.getElementById('timerBarDot');
+    const label = document.getElementById('timerBarStatusLabel');
+    const toggleBtn = document.getElementById('timerBarToggleBtn');
 
-      const particles = [];
-      const colors = ["#38bdf8", "#6366f1", "#10b981", "#f59e0b", "#f43f5e", "#a7f3d0"];
+    if (state.timer.status === 'running') {
+      dot.classList.add('is-pulsing');
+      label.textContent = '타이머 실행 중';
+      toggleBtn.textContent = '일시정지';
+    } else {
+      dot.classList.remove('is-pulsing');
+      label.textContent = '타이머 일시정지됨';
+      toggleBtn.textContent = '재개';
+    }
+  }
 
-      for (let i = 0; i < 70; i++) {
-        particles.push({
-          x: canvas.width / 2,
-          y: canvas.height * 0.4,
-          r: Math.random() * 6 + 4,
-          dx: (Math.random() - 0.5) * 14,
-          dy: (Math.random() - 0.9) * 16,
-          color: colors[Math.floor(Math.random() * colors.length)],
-          rotation: Math.random() * 360,
-          rotSpeed: (Math.random() - 0.5) * 10,
-          opacity: 1
-        });
-      }
+  function handleTimerFinished() {
+    stopTimerTicker();
+    const finishedSched = state.schedules.find(s => s.id === state.timer.scheduleId);
+    const finishedIdx = finishedSched
+      ? finishedSched.activities.findIndex(a => a.id === state.timer.activityId)
+      : -1;
+    const finishedAct = finishedIdx !== -1 ? finishedSched.activities[finishedIdx] : null;
+    const nextAct = (finishedSched && finishedIdx !== -1 && finishedIdx + 1 < finishedSched.activities.length)
+      ? finishedSched.activities[finishedIdx + 1]
+      : null;
 
-      let animId;
-      function animate() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        let alive = false;
+    state.timer.status = 'ended';
+    state.timer.remainingSeconds = 0;
+    state.timer.endTimestamp = null;
+    persistTimer();
 
-        particles.forEach(p => {
-          p.x += p.dx;
-          p.y += p.dy;
-          p.dy += 0.45;
-          p.dx *= 0.98;
-          p.rotation += p.rotSpeed;
-          p.opacity -= 0.012;
+    playCompletionChime();
 
-          if (p.opacity > 0) {
-            alive = true;
-            ctx.save();
-            ctx.globalAlpha = p.opacity;
-            ctx.translate(p.x, p.y);
-            ctx.rotate((p.rotation * Math.PI) / 180);
-            ctx.fillStyle = p.color;
-            ctx.fillRect(-p.r, -p.r, p.r * 2, p.r * 1.4);
-            ctx.restore();
+    if (state.activeView === 'result') {
+      renderResultView();
+    }
+
+    showTimerCompleteModal(finishedAct, nextAct);
+  }
+
+  function showTimerCompleteModal(finishedAct, nextAct) {
+    const modal = document.getElementById('timerAlertModal');
+    const nameEl = document.getElementById('timerAlertFinishedName');
+    const nextBox = document.getElementById('timerAlertNextBox');
+    const nextBtn = document.getElementById('timerAlertNextBtn');
+
+    nameEl.textContent = finishedAct
+      ? `'${finishedAct.title}' (${formatDuration(finishedAct.duration)}) 타이머가 끝났어요.`
+      : '설정한 활동 시간이 종료되었습니다.';
+
+    if (nextAct) {
+      nextBox.innerHTML = `<span>➡️</span><span><strong>다음 활동:</strong> ${escapeHtml(nextAct.title)}<br>시작 시간: ${nextAct.startTime} ~ ${nextAct.endTime} (${formatDuration(nextAct.duration)})</span>`;
+      nextBtn.style.display = 'inline-flex';
+      nextBtn.dataset.nextId = nextAct.id;
+    } else {
+      nextBox.innerHTML = `<span>🎉</span><span>이번 공강 시간표의 마지막 활동까지 모두 마쳤어요!</span>`;
+      nextBtn.style.display = 'none';
+      delete nextBtn.dataset.nextId;
+    }
+
+    modal.classList.add('is-open');
+  }
+
+  /* ==================== RENDER: HISTORY VIEW ==================== */
+  function renderHistoryView() {
+    const listEl = document.getElementById('historyList');
+    const statsEl = document.getElementById('historyStatsSummary');
+    const bannerEl = document.getElementById('sameWeekdayHistoryBanner');
+    const bannerText = document.getElementById('sameWeekdayHistoryText');
+    const reuseBtn = document.getElementById('sameWeekdayReuseBtn');
+
+    const todayStr = getTodayLocalDateStr();
+    const todayWeekday = getWeekdayKo(todayStr);
+
+    // Find latest schedule matching today's weekday (preferring an older date, or any)
+    const matchingWeekdayList = state.schedules
+      .filter(s => s.dayOfWeek === todayWeekday)
+      .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0));
+
+    if (matchingWeekdayList.length > 0) {
+      const sample = matchingWeekdayList[0];
+      bannerEl.style.display = 'flex';
+      bannerText.innerHTML = `<strong>${todayWeekday}요일 시간표 빠른 불러오기:</strong> '${formatKoreanDate(sample.date)}'에 사용한 시간표(${formatDuration(sample.duration)}, ${sample.goals.join('·')})를 오늘(${formatKoreanDate(todayStr)}) 일정으로 복사할 수 있어요!`;
+      reuseBtn.dataset.schedId = sample.id;
+    } else {
+      bannerEl.style.display = 'none';
+    }
+
+    document.querySelectorAll('#weekdayFilterRow .chip-btn').forEach(btn => {
+      btn.classList.toggle('is-selected', btn.dataset.weekday === state.historyWeekdayFilter);
+    });
+
+    const sorted = [...state.schedules].sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0));
+    const filtered = state.historyWeekdayFilter === 'all'
+      ? sorted
+      : sorted.filter(s => s.dayOfWeek === state.historyWeekdayFilter);
+
+    const avgRate = sorted.length > 0
+      ? Math.round(sorted.reduce((acc, s) => acc + computeProgress(s.activities).percent, 0) / sorted.length)
+      : 0;
+    statsEl.textContent = `저장된 시간표 ${sorted.length}개 · 평균 달성률 ${avgRate}%`;
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">🗂️</div>
+          <h3>${state.historyWeekdayFilter === 'all' ? '아직 저장된 시간표 기록이 없어요' : `${state.historyWeekdayFilter}요일에 저장된 시간표가 없어요`}</h3>
+          <p>공강 일정을 만들면 자동으로 저장되어 언제든 다시 불러와 쓸 수 있습니다.</p>
+          <button type="button" class="btn btn-primary" id="historyEmptyCreateBtn">첫 공강 시간표 만들기</button>
+        </div>
+      `;
+      const btn = document.getElementById('historyEmptyCreateBtn');
+      if (btn) btn.addEventListener('click', () => switchView('input'));
+      return;
+    }
+
+    listEl.innerHTML = filtered.map(sched => {
+      const prog = computeProgress(sched.activities);
+      const doneList = sched.activities.filter(a => a.completed);
+      const todoList = sched.activities.filter(a => !a.completed);
+      const endInfo = addMinutesToTime(sched.startTime, sched.duration);
+      const endStr = endInfo.dayOffset > 0 ? `+${endInfo.dayOffset}일 ${endInfo.hhmm}` : endInfo.hhmm;
+
+      return `
+        <article class="history-card" data-history-id="${sched.id}">
+          <div class="history-card-top">
+            <div>
+              <h3 class="history-date-title">${formatKoreanDate(sched.date)} · ${sched.startTime} ~ ${endStr} (${formatDuration(sched.duration)})</h3>
+              <p class="history-meta">
+                📍 ${escapeHtml(sched.location)} · 🔋 ${escapeHtml(sched.condition)} · 🎯 ${sched.goals.map((g, i) => `${i + 1}순위 ${g}`).join(' > ')}
+              </p>
+            </div>
+            <span class="history-progress-badge">달성률 ${prog.percent}% (${prog.completedCount}/${prog.totalCount})</span>
+          </div>
+
+          <div class="progress-track" style="height: 8px;">
+            <div class="progress-fill" style="width: ${prog.percent}%;"></div>
+          </div>
+
+          <div class="history-tasks-split">
+            <div class="history-task-col">
+              <h4>✅ 완료한 활동 (${doneList.length})</h4>
+              <ul>
+                ${doneList.length > 0
+                  ? doneList.map(a => `<li>${a.startTime} ${escapeHtml(a.title)} (${formatDuration(a.duration)})</li>`).join('')
+                  : '<li style="color:var(--text-muted); list-style:none;">아직 완료한 활동이 없어요.</li>'}
+              </ul>
+            </div>
+            <div class="history-task-col">
+              <h4>⏳ 미완료 활동 (${todoList.length})</h4>
+              <ul>
+                ${todoList.length > 0
+                  ? todoList.map(a => `<li>${a.startTime} ${escapeHtml(a.title)} (${formatDuration(a.duration)})</li>`).join('')
+                  : '<li style="color:var(--mint-600); list-style:none;">모든 활동을 완료했어요!</li>'}
+              </ul>
+            </div>
+          </div>
+
+          <div class="history-card-foot">
+            <span class="history-updated">마지막 수정: ${escapeHtml(sched.lastModified || '-')}</span>
+            <div class="history-actions">
+              <button type="button" class="btn btn-secondary btn-xs hist-load-btn" data-id="${sched.id}">불러와 이어하기</button>
+              <button type="button" class="btn btn-soft btn-xs hist-reuse-today-btn" data-id="${sched.id}">오늘 날짜로 복사 재사용</button>
+              <button type="button" class="btn btn-danger-soft btn-xs hist-delete-btn" data-id="${sched.id}">삭제</button>
+            </div>
+          </div>
+        </article>
+      `;
+    }).join('');
+  }
+
+  function loadHistoryScheduleAsActive(schedId) {
+    const found = state.schedules.find(s => s.id === schedId);
+    if (!found) return;
+    state.activeScheduleId = found.id;
+    safeSetStorage(STORAGE_KEY_ACTIVE_ID, found.id);
+    switchView('result');
+    showToast(`${formatKoreanDate(found.date)} 시간표를 불러왔어요.`);
+  }
+
+  function cloneScheduleToDate(schedId, targetDateStr) {
+    const source = state.schedules.find(s => s.id === schedId);
+    if (!source) return;
+    const clonedActivities = source.activities.map(a => ({
+      ...a,
+      id: generateUniqueId('act'),
+      completed: false
+    }));
+    const cloned = {
+      ...source,
+      id: generateUniqueId('sched'),
+      date: targetDateStr,
+      dayOfWeek: getWeekdayKo(targetDateStr),
+      activities: computeTimelineTimes(source.startTime, clonedActivities),
+      lastModified: formatLocalTimestampNow(),
+      lastModifiedMs: Date.now()
+    };
+    cloned.progress = computeProgress(cloned.activities);
+
+    // Insert as new record without overwriting source!
+    state.schedules.unshift(cloned);
+    state.activeScheduleId = cloned.id;
+    persistSchedules('새 날짜로 복사 저장');
+    switchView('result');
+    showToast(`${formatKoreanDate(source.date)} 시간표를 ${formatKoreanDate(targetDateStr)} 새 일정으로 복사했어요.`);
+  }
+
+  function requestDeleteHistory(schedId) {
+    const target = state.schedules.find(s => s.id === schedId);
+    if (!target) return;
+    openConfirmModal(
+      '저장된 시간표 삭제',
+      `${formatKoreanDate(target.date)} (${target.startTime}, ${formatDuration(target.duration)}) 기록을 영구적으로 삭제할까요?`,
+      [
+        {
+          label: '취소',
+          cls: 'btn btn-secondary btn-sm',
+          onClick: () => closeModal('confirmModal')
+        },
+        {
+          label: '삭제하기',
+          cls: 'btn btn-danger-soft btn-sm',
+          onClick: () => {
+            if (state.timer.scheduleId === schedId) {
+              resetActiveTimer(true);
+            }
+            state.schedules = state.schedules.filter(s => s.id !== schedId);
+            if (state.activeScheduleId === schedId) {
+              state.activeScheduleId = state.schedules.length > 0 ? state.schedules[0].id : null;
+            }
+            persistSchedules('기록 삭제 저장');
+            renderHistoryView();
+            closeModal('confirmModal');
+            showToast('선택한 시간표 기록을 삭제했어요.');
           }
-        });
+        }
+      ]
+    );
+  }
 
-        if (alive) {
-          animId = requestAnimationFrame(animate);
-        } else {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          cancelAnimationFrame(animId);
+  /* ==================== MODALS & ESCAPING ==================== */
+  function openConfirmModal(title, message, buttons) {
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+    const foot = document.getElementById('confirmModalFoot');
+    foot.innerHTML = '';
+    buttons.forEach(cfg => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = cfg.cls;
+      b.textContent = cfg.label;
+      b.addEventListener('click', cfg.onClick);
+      foot.appendChild(b);
+    });
+    document.getElementById('confirmModal').classList.add('is-open');
+  }
+
+  function closeModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('is-open');
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /* ==================== EVENT WIRING ==================== */
+  function bindEvents() {
+    // Header navigation
+    document.getElementById('brandHomeBtn').addEventListener('click', () => switchView('home'));
+    document.querySelectorAll('.nav-tab').forEach(btn => {
+      btn.addEventListener('click', () => switchView(btn.dataset.view));
+    });
+
+    // Home buttons
+    document.getElementById('startPlanBtn').addEventListener('click', () => switchView('input'));
+    document.getElementById('homeResumeBtn').addEventListener('click', () => switchView('result'));
+    document.getElementById('homeHistoryBtn').addEventListener('click', () => switchView('history'));
+
+    // Input View: Date & Time
+    document.getElementById('gapDateInput').addEventListener('change', (e) => {
+      state.input.date = e.target.value;
+      updateDatePreviewUI();
+      renderSameWeekdayHintOnInput();
+      persistDraft();
+    });
+    document.getElementById('setTodayDateBtn').addEventListener('click', () => {
+      state.input.date = getTodayLocalDateStr();
+      document.getElementById('gapDateInput').value = state.input.date;
+      updateDatePreviewUI();
+      renderSameWeekdayHintOnInput();
+      persistDraft();
+    });
+
+    document.getElementById('gapStartTimeInput').addEventListener('input', (e) => {
+      state.input.startTime = e.target.value;
+      updateStartTimePreviewUI();
+      persistDraft();
+    });
+    document.getElementById('setCurrentTimeBtn').addEventListener('click', () => {
+      state.input.startTime = getCurrentLocalTimeStr();
+      document.getElementById('gapStartTimeInput').value = state.input.startTime;
+      updateStartTimePreviewUI();
+      persistDraft();
+    });
+    document.querySelectorAll('.start-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.input.startTime = btn.dataset.time;
+        document.getElementById('gapStartTimeInput').value = state.input.startTime;
+        updateStartTimePreviewUI();
+        persistDraft();
+      });
+    });
+
+    // Input View: Duration Slider, Tick Labels & Quick Buttons
+    const slider = document.getElementById('durationSlider');
+    slider.addEventListener('input', (e) => {
+      syncDurationUI(Number(e.target.value));
+      persistDraft();
+    });
+    slider.addEventListener('change', (e) => {
+      syncDurationUI(Number(e.target.value));
+      persistDraft();
+    });
+
+    document.getElementById('quickDurationGrid').addEventListener('click', (e) => {
+      const btn = e.target.closest('.dur-btn');
+      if (!btn) return;
+      syncDurationUI(Number(btn.dataset.minutes));
+      persistDraft();
+    });
+
+    document.getElementById('sliderLabelsFrame').addEventListener('click', (e) => {
+      const lbl = e.target.closest('.slider-tick-label');
+      if (!lbl) return;
+      syncDurationUI(Number(lbl.dataset.minutes));
+      persistDraft();
+    });
+
+    // Input View: Location & Condition
+    document.getElementById('locationOptions').addEventListener('click', (e) => {
+      const card = e.target.closest('.choice-card');
+      if (!card) return;
+      state.input.location = card.dataset.location;
+      renderChoiceSelections();
+      updateSubmitSummaryUI();
+      persistDraft();
+    });
+
+    document.getElementById('conditionOptions').addEventListener('click', (e) => {
+      const card = e.target.closest('.choice-card');
+      if (!card) return;
+      state.input.condition = card.dataset.condition;
+      renderChoiceSelections();
+      updateSubmitSummaryUI();
+      persistDraft();
+    });
+
+    // Input View: Multi-select Goals & Priorities
+    document.getElementById('goalsGrid').addEventListener('click', (e) => {
+      const btn = e.target.closest('.goal-toggle');
+      if (!btn) return;
+      const goal = btn.dataset.goal;
+      const idx = state.input.goals.indexOf(goal);
+      if (idx === -1) {
+        state.input.goals.push(goal);
+      } else {
+        state.input.goals.splice(idx, 1);
+      }
+      renderGoalsAndPriorityUI();
+      persistDraft();
+    });
+
+    document.getElementById('priorityList').addEventListener('click', (e) => {
+      const upBtn = e.target.closest('.move-priority-up');
+      const downBtn = e.target.closest('.move-priority-down');
+      if (upBtn) {
+        const idx = Number(upBtn.dataset.idx);
+        if (idx > 0) {
+          const tmp = state.input.goals[idx - 1];
+          state.input.goals[idx - 1] = state.input.goals[idx];
+          state.input.goals[idx] = tmp;
+          renderGoalsAndPriorityUI();
+          persistDraft();
+        }
+      } else if (downBtn) {
+        const idx = Number(downBtn.dataset.idx);
+        if (idx < state.input.goals.length - 1) {
+          const tmp = state.input.goals[idx + 1];
+          state.input.goals[idx + 1] = state.input.goals[idx];
+          state.input.goals[idx] = tmp;
+          renderGoalsAndPriorityUI();
+          persistDraft();
         }
       }
-      animate();
-    }
+    });
 
-    window.addEventListener("resize", () => {
-      const canvas = document.getElementById("confetti-canvas");
-      if (canvas) {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+    // Input View: Memo
+    document.getElementById('memoInput').addEventListener('input', (e) => {
+      state.input.memo = e.target.value;
+      persistDraft();
+    });
+    document.querySelectorAll('.memo-example-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.input.memo = btn.dataset.memo;
+        document.getElementById('memoInput').value = state.input.memo;
+        persistDraft();
+      });
+    });
+    document.getElementById('clearMemoBtn').addEventListener('click', () => {
+      state.input.memo = '';
+      document.getElementById('memoInput').value = '';
+      persistDraft();
+    });
+
+    // Input View: History & Reuse
+    document.getElementById('inputToHistoryBtn').addEventListener('click', () => switchView('history'));
+    document.getElementById('reuseWeekdayQuickBtn').addEventListener('click', () => {
+      const weekday = getWeekdayKo(state.input.date);
+      const match = state.schedules.find(s => s.dayOfWeek === weekday);
+      if (match) {
+        cloneScheduleToDate(match.id, state.input.date);
       }
     });
 
-    document.addEventListener("DOMContentLoaded", () => {
-      updateDurationUI(state.duration);
-      updateTimeKoreanDisplay(state.startTime);
-      updateQuickTimeActiveState();
+    // Generate Schedule Submit
+    document.getElementById('generateScheduleBtn').addEventListener('click', () => {
+      if (!validateInputs()) return;
+      state.variationSeed += 1;
+      const newSched = buildScheduleFromInput(state.input, state.variationSeed);
+      state.schedules.unshift(newSched);
+      state.activeScheduleId = newSched.id;
+      persistSchedules('새 시간표 자동 저장');
+      switchView('result');
+      showToast('맞춤 공강 시간표를 생성하고 저장했어요!');
     });
+
+    // Result View: Empty State & Top Actions
+    document.getElementById('emptyToInputBtn').addEventListener('click', () => switchView('input'));
+    document.getElementById('emptyToHistoryBtn').addEventListener('click', () => switchView('history'));
+
+    document.getElementById('editInputsBtn').addEventListener('click', () => {
+      const sched = getActiveSchedule();
+      if (sched) {
+        state.input = {
+          date: sched.date,
+          startTime: sched.startTime,
+          duration: sched.duration,
+          location: sched.location,
+          condition: sched.condition,
+          goals: [...sched.goals],
+          memo: sched.memo || ''
+        };
+        persistDraft();
+      }
+      switchView('input');
+    });
+
+    document.getElementById('resultToHistoryBtn').addEventListener('click', () => switchView('history'));
+
+    document.getElementById('rerollScheduleBtn').addEventListener('click', () => {
+      const current = getActiveSchedule();
+      const sourceInput = current ? {
+        date: current.date,
+        startTime: current.startTime,
+        duration: current.duration,
+        location: current.location,
+        condition: current.condition,
+        goals: [...current.goals],
+        memo: current.memo || ''
+      } : state.input;
+
+      state.variationSeed += 1;
+      const altSched = buildScheduleFromInput(sourceInput, state.variationSeed);
+      // Create a new distinct record so past saved schedules are NEVER overwritten
+      state.schedules.unshift(altSched);
+      state.activeScheduleId = altSched.id;
+      if (state.timer.status !== 'idle') {
+        resetActiveTimer(true);
+      }
+      persistSchedules('새 추천 조합 저장');
+      renderResultView();
+      showToast('새로운 활동 조합으로 추천해 드렸어요! (기존 기록은 안전하게 보존됩니다)');
+    });
+
+    document.getElementById('addActivityBtn').addEventListener('click', () => openActivityModal('add'));
+    document.getElementById('changeStartTimeBtn').addEventListener('click', () => {
+      const sched = getActiveSchedule();
+      if (!sched) return;
+      document.getElementById('modalNewStartTime').value = sched.startTime;
+      document.getElementById('startTimeModal').classList.add('is-open');
+    });
+    document.getElementById('startTimeModalClose').addEventListener('click', () => closeModal('startTimeModal'));
+    document.getElementById('startTimeModalCancel').addEventListener('click', () => closeModal('startTimeModal'));
+    document.getElementById('startTimeModalForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const sched = getActiveSchedule();
+      const newTime = document.getElementById('modalNewStartTime').value;
+      if (!sched || !/^\d{2}:\d{2}$/.test(newTime)) {
+        showToast('올바른 시작 시간을 선택해 주세요.', 'warn');
+        return;
+      }
+      sched.startTime = newTime;
+      finalizeScheduleMutation(sched, '시작 시간 변경 저장');
+      closeModal('startTimeModal');
+      showToast(`시작 시간을 ${formatKoreanTime(newTime)}으로 변경하고 전체 일정을 재계산했어요.`);
+    });
+
+    // Sticky Timer Bar Buttons
+    document.getElementById('timerBarToggleBtn').addEventListener('click', () => {
+      if (state.timer.status === 'running') {
+        pauseActiveTimer();
+      } else if (state.timer.status === 'paused') {
+        resumeActiveTimer();
+      }
+    });
+    document.getElementById('timerBarResetBtn').addEventListener('click', () => resetActiveTimer(false));
+
+    // Timeline Card Delegated Events
+    document.getElementById('timelineList').addEventListener('click', (e) => {
+      const checkBtn = e.target.closest('.act-toggle-done');
+      if (checkBtn) {
+        toggleActivityDone(checkBtn.dataset.id);
+        return;
+      }
+      const startBtn = e.target.closest('.act-timer-start');
+      if (startBtn) {
+        startActivityTimer(startBtn.dataset.id);
+        return;
+      }
+      const pauseBtn = e.target.closest('.act-timer-pause');
+      if (pauseBtn) {
+        pauseActiveTimer();
+        return;
+      }
+      const resumeBtn = e.target.closest('.act-timer-resume');
+      if (resumeBtn) {
+        resumeActiveTimer();
+        return;
+      }
+      const resetBtn = e.target.closest('.act-timer-reset');
+      if (resetBtn) {
+        resetActiveTimer(false);
+        return;
+      }
+      const upBtn = e.target.closest('.act-move-up');
+      if (upBtn) {
+        moveActivityOrder(Number(upBtn.dataset.idx), -1);
+        return;
+      }
+      const downBtn = e.target.closest('.act-move-down');
+      if (downBtn) {
+        moveActivityOrder(Number(downBtn.dataset.idx), 1);
+        return;
+      }
+      const editBtn = e.target.closest('.act-edit-btn');
+      if (editBtn) {
+        openActivityModal('edit', editBtn.dataset.id);
+        return;
+      }
+      const delBtn = e.target.closest('.act-delete-btn');
+      if (delBtn) {
+        requestDeleteActivity(delBtn.dataset.id);
+      }
+    });
+
+    // Activity Modal Events
+    document.getElementById('activityModalClose').addEventListener('click', () => closeModal('activityModal'));
+    document.getElementById('activityModalCancel').addEventListener('click', () => closeModal('activityModal'));
+    document.getElementById('modalActDuration').addEventListener('change', evaluateModalBudget);
+    document.getElementById('activityModalForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      saveActivityModal(false);
+    });
+    document.getElementById('activityModalAdjustSaveBtn').addEventListener('click', () => saveActivityModal(true));
+
+    // Confirm Modal Close
+    document.getElementById('confirmModalClose').addEventListener('click', () => closeModal('confirmModal'));
+
+    // Timer Alert Modal Events
+    document.getElementById('timerAlertClose').addEventListener('click', () => closeModal('timerAlertModal'));
+    document.getElementById('timerAlertOkBtn').addEventListener('click', () => closeModal('timerAlertModal'));
+    document.getElementById('timerAlertNextBtn').addEventListener('click', (e) => {
+      const nextId = e.currentTarget.dataset.nextId;
+      closeModal('timerAlertModal');
+      if (nextId) {
+        const card = document.querySelector(`[data-act-id="${nextId}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.style.boxShadow = '0 0 0 3px var(--mint-500)';
+          setTimeout(() => { card.style.boxShadow = ''; }, 1800);
+        }
+      }
+    });
+
+    // Close modals on backdrop click or Escape
+    ['activityModal', 'confirmModal', 'timerAlertModal', 'startTimeModal'].forEach(id => {
+      document.getElementById(id).addEventListener('click', (e) => {
+        if (e.target.id === id) closeModal(id);
+      });
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeModal('activityModal');
+        closeModal('confirmModal');
+        closeModal('timerAlertModal');
+        closeModal('startTimeModal');
+      }
+    });
+
+    // History View Events
+    document.getElementById('historyNewPlanBtn').addEventListener('click', () => switchView('input'));
+    document.getElementById('sameWeekdayReuseBtn').addEventListener('click', (e) => {
+      const schedId = e.currentTarget.dataset.schedId;
+      if (schedId) cloneScheduleToDate(schedId, getTodayLocalDateStr());
+    });
+
+    document.getElementById('weekdayFilterRow').addEventListener('click', (e) => {
+      const btn = e.target.closest('.chip-btn');
+      if (!btn) return;
+      state.historyWeekdayFilter = btn.dataset.weekday;
+      renderHistoryView();
+    });
+
+    document.getElementById('historyList').addEventListener('click', (e) => {
+      const loadBtn = e.target.closest('.hist-load-btn');
+      if (loadBtn) {
+        loadHistoryScheduleAsActive(loadBtn.dataset.id);
+        return;
+      }
+      const reuseBtn = e.target.closest('.hist-reuse-today-btn');
+      if (reuseBtn) {
+        cloneScheduleToDate(reuseBtn.dataset.id, getTodayLocalDateStr());
+        return;
+      }
+      const delBtn = e.target.closest('.hist-delete-btn');
+      if (delBtn) {
+        requestDeleteHistory(delBtn.dataset.id);
+      }
+    });
+
+    // Visibility change: immediately re-sync live timer if tab wakes up
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && state.timer.status === 'running') {
+        tickTimer();
+      }
+    });
+  }
+
+  /* ==================== INITIALIZATION ==================== */
+  function init() {
+    loadAllFromStorage();
+    bindEvents();
+    updateBadges();
+
+    const savedView = safeGetStorage(STORAGE_KEY_VIEW);
+    const validViews = ['home', 'input', 'result', 'history'];
+    let initialView = validViews.includes(savedView) ? savedView : 'home';
+    if (initialView === 'result' && !getActiveSchedule()) {
+      initialView = 'home';
+    }
+    switchView(initialView);
+
+    // Check persisted running timer on reload
+    if (state.timer.status === 'running') {
+      const rem = computeLiveRemainingSeconds();
+      if (rem <= 0) {
+        handleTimerFinished();
+      } else {
+        ensureTimerTicker();
+      }
+    }
+  }
+
+  init();
+})();
